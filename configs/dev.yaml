@@ -1,0 +1,42 @@
+qwen:
+  # 推荐写法：从环境变量注入（根目录 .env 仅用于本机开发）
+  api_key: ${DASHSCOPE_API_KEY}
+  # 可选覆盖（不写则使用默认 DashScope OpenAI-compat base_url）
+  base_url: ${DASHSCOPE_BASE_URL}
+  model: qwen3-omni-flash
+  timeout_s: 60
+  max_retries: 2
+
+vrchat:
+  osc:
+    send_host: 127.0.0.1
+    send_port: 9000
+    recv_host: 0.0.0.0
+    recv_port: 9001
+    # Windows 默认：%APPDATA%\..\LocalLow\VRChat\VRChat\OSC
+    config_path: ${APPDATA}/../LocalLow/VRChat/VRChat/OSC
+
+audio:
+  input:
+    device: null
+    sample_rate: 48000
+    channels: 1
+  output:
+    device: null
+    sample_rate: 48000
+    channels: 1
+  vad:
+    silence_duration_ms: 600
+    min_speech_duration_ms: 300
+    energy_threshold: 0.015
+
+tools:
+  enabled: true
+  max_calls_per_turn: 8
+  whitelist:
+    - vrc_set_param
+    - vrc_pulse_param
+    - vrc_chatbox
+    - vrc_typing
+    - vrc_get_avatar_context
+  rate_limit: {}
