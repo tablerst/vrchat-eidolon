@@ -19,8 +19,8 @@ class ToolResult:
     tool_call_id: str
     name: str
     ok: bool
-    content: str | dict[str, Any]
-    error: dict[str, str] | None = None
+    content: dict[str, Any]
+    error: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

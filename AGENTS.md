@@ -20,7 +20,7 @@ When debugging or adding features, always locate and reason about this chain:
 
 Implementation anchors (start here, then branch out):
 
-- Orchestration: `src/orchestrator/simple.py`, `src/orchestrator/session.py`
+- Orchestration: `src/orchestrator/graph_orchestrator.py`, `src/orchestrator/graph_state.py`
 - Qwen adapter: `src/qwen/client.py`, `src/qwen/tool_call_accumulator.py`
 - Tool guards: `src/tools/runtime.py`
 - Config: `src/core/config.py`

@@ -10,6 +10,7 @@ def test_tools_disabled() -> None:
     res = tools.execute(tool_call_id="1", name="ok", arguments={})
     assert res.ok is False
     assert res.error and res.error["type"] == "tools_disabled"
+    assert set(res.content.keys()) == {"text", "data", "raw", "meta"}
 
 
 def test_tools_whitelist_blocks() -> None:
@@ -19,6 +20,7 @@ def test_tools_whitelist_blocks() -> None:
     res = tools.execute(tool_call_id="1", name="nope", arguments={})
     assert res.ok is False
     assert res.error and res.error["type"] == "not_allowed"
+    assert set(res.content.keys()) == {"text", "data", "raw", "meta"}
 
 
 def test_tools_rate_limit_blocks() -> None:
@@ -28,6 +30,7 @@ def test_tools_rate_limit_blocks() -> None:
     res = tools.execute(tool_call_id="1", name="ok", arguments={})
     assert res.ok is False
     assert res.error and res.error["type"] == "rate_limited"
+    assert set(res.content.keys()) == {"text", "data", "raw", "meta"}
 
 
 def test_tool_not_registered() -> None:
@@ -36,6 +39,7 @@ def test_tool_not_registered() -> None:
     res = tools.execute(tool_call_id="1", name="ok", arguments={})
     assert res.ok is False
     assert res.error and res.error["type"] == "not_found"
+    assert set(res.content.keys()) == {"text", "data", "raw", "meta"}
 
 
 def test_tool_exec_ok() -> None:
@@ -44,4 +48,5 @@ def test_tool_exec_ok() -> None:
 
     res = tools.execute(tool_call_id="1", name="ok", arguments={"a": 1})
     assert res.ok is True
-    assert res.content == {"echo": {"a": 1}}
+    assert res.content["data"] == {"echo": {"a": 1}}
+    assert set(res.content.keys()) == {"text", "data", "raw", "meta"}

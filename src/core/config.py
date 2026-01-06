@@ -104,6 +104,7 @@ class AudioConfig:
 class ToolsConfig:
     enabled: bool = True
     max_calls_per_turn: int = 5
+    max_concurrency: int = 5
     whitelist: list[str] = field(default_factory=list)
     rate_limit: dict[str, int] = field(default_factory=dict)
 
@@ -113,22 +114,12 @@ class McpConfig:
     """Client-side MCP configuration.
 
     This project uses `langchain-mcp-adapters` to manage MCP connections.
-
-    We keep a backward-compatible single-server shape (transport/url/command/args)
-    while also supporting a multi-server config via `mcp.servers`.
     """
 
     enabled: bool = False
     # New preferred format: a dict of server_name -> server_config.
     # Each server config is passed to MultiServerMCPClient as-is.
     servers: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-    # Legacy single-server fields (still supported).
-    transport: str = "http"  # http(streamable_http) | stdio
-    url: str | None = "http://127.0.0.1:8001/mcp"
-    command: str | None = None
-    args: list[str] = field(default_factory=list)
-    timeout_s: float = 10.0
 
 
 @dataclass(frozen=True)
@@ -243,27 +234,18 @@ def load_config(path: str | Path) -> AppConfig:
         tools = ToolsConfig(
             enabled=bool(tools_raw.get("enabled", ToolsConfig.enabled)),
             max_calls_per_turn=int(tools_raw.get("max_calls_per_turn", ToolsConfig.max_calls_per_turn)),
+            max_concurrency=int(tools_raw.get("max_concurrency", ToolsConfig.max_concurrency)),
             whitelist=list(whitelist),
             rate_limit={k: int(v) for k, v in rate_limit.items()},
         )
+
+        if tools.max_concurrency < 1:
+            raise ConfigError("必须是 >= 1 的整数", path="tools.max_concurrency")
 
     mcp = McpConfig()
     mcp_raw = expanded.get("mcp")
     if isinstance(mcp_raw, dict):
         enabled = bool(mcp_raw.get("enabled", McpConfig.enabled))
-        transport = str(mcp_raw.get("transport", McpConfig.transport))
-        url = mcp_raw.get("url", McpConfig.url)
-        if url is not None:
-            url = str(url)
-
-        command = mcp_raw.get("command", None)
-        if command is not None:
-            command = str(command)
-
-        args = mcp_raw.get("args", [])
-        if not isinstance(args, list) or not all(isinstance(x, str) for x in args):
-            raise ConfigError("必须是字符串列表", path="mcp.args")
-
         servers_raw = mcp_raw.get("servers", {})
         if servers_raw is None:
             servers_raw = {}
@@ -278,60 +260,26 @@ def load_config(path: str | Path) -> AppConfig:
                 raise ConfigError("server config 必须是 dict", path=f"mcp.servers.{k}")
             servers[k] = dict(v)
 
-        timeout_s = float(mcp_raw.get("timeout_s", McpConfig.timeout_s))
+        if enabled and not servers:
+            raise ConfigError("启用 MCP 时必须提供 mcp.servers", path="mcp.servers")
 
         if enabled:
-            if servers:
-                # Validate per-server transport minimally.
-                for name, scfg in servers.items():
-                    t = str(scfg.get("transport", ""))
-                    if t not in {"stdio", "streamable_http", "http"}:
-                        raise ConfigError(f"不支持的 transport: {t!r}", path=f"mcp.servers.{name}.transport")
-                    if t == "stdio":
-                        cmd = scfg.get("command")
-                        if not isinstance(cmd, str) or not cmd.strip():
-                            raise ConfigError("stdio 需要 command", path=f"mcp.servers.{name}.command")
-                    else:
-                        u = scfg.get("url")
-                        if not isinstance(u, str) or not u.strip():
-                            raise ConfigError("http 需要 url", path=f"mcp.servers.{name}.url")
-            else:
-                # Legacy single-server validation.
-                if transport == "stdio":
-                    if command is None or command.strip() == "":
-                        raise ConfigError("启用 stdio MCP 时必须提供 command", path="mcp.command")
-                elif transport == "http":
-                    if url is None or url.strip() == "":
-                        raise ConfigError("启用 http MCP 时必须提供 url", path="mcp.url")
+            for name, scfg in servers.items():
+                t = str(scfg.get("transport", ""))
+                if t not in {"stdio", "streamable_http", "http"}:
+                    raise ConfigError(f"不支持的 transport: {t!r}", path=f"mcp.servers.{name}.transport")
+                if t == "stdio":
+                    cmd = scfg.get("command")
+                    if not isinstance(cmd, str) or not cmd.strip():
+                        raise ConfigError("stdio 需要 command", path=f"mcp.servers.{name}.command")
+                    args = scfg.get("args", [])
+                    if not isinstance(args, list) or not all(isinstance(x, str) for x in args):
+                        raise ConfigError("必须是字符串列表", path=f"mcp.servers.{name}.args")
                 else:
-                    raise ConfigError(f"不支持的 MCP transport: {transport!r}", path="mcp.transport")
+                    u = scfg.get("url")
+                    if not isinstance(u, str) or not u.strip():
+                        raise ConfigError("http 需要 url", path=f"mcp.servers.{name}.url")
 
-        # If servers is not provided, translate legacy config into a default server.
-        if enabled and not servers:
-            if transport == "stdio":
-                servers = {
-                    "default": {
-                        "transport": "stdio",
-                        "command": command,
-                        "args": list(args),
-                    }
-                }
-            else:
-                servers = {
-                    "default": {
-                        "transport": "streamable_http",
-                        "url": url,
-                    }
-                }
-
-        mcp = McpConfig(
-            enabled=enabled,
-            servers=servers,
-            transport=transport,
-            url=url,
-            command=command,
-            args=list(args),
-            timeout_s=timeout_s,
-        )
+        mcp = McpConfig(enabled=enabled, servers=servers)
 
     return AppConfig(qwen=qwen, vrchat=vrchat, audio=audio, tools=tools, mcp=mcp)

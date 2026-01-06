@@ -4,12 +4,8 @@ import argparse
 import os
 
 from observability.logging import configure_logging, get_logger
-from orchestrator.simple import Orchestrator
+from orchestrator.graph_orchestrator import GraphOrchestrator
 from qwen.client import FakeQwenClient, QwenClient
-from tools.mcp_bridge import register_mcp_tools
-from tools.langchain_mcp_client import LangchainMcpClient, LangchainMcpClientConfig
-from tools.openai_tools import get_openai_tool_specs
-from tools.runtime import ToolRegistry
 
 from .config import load_config
 
@@ -34,38 +30,14 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = load_config(args.config)
 
-    tools = ToolRegistry(
-        enabled=cfg.tools.enabled,
-        whitelist=cfg.tools.whitelist,
-        rate_limits={name: float(cps) for name, cps in cfg.tools.rate_limit.items()},
-    )
-
-    # Built-in echo tool for local debugging.
-    tools.register("echo", lambda a: {"echo": a})
-
-    plan_tools: list[dict[str, object]] | None = None
-    if cfg.mcp.enabled:
-        # MCP connections/tools are managed via `langchain-mcp-adapters`.
-        # `cfg.mcp.servers` is the preferred shape; legacy config is translated by load_config.
-        mcp = LangchainMcpClient(LangchainMcpClientConfig(servers=dict(cfg.mcp.servers)))
-
-        # MVP-0: expose a small set of MCP-backed tools.
-        exposed = ["vrc_status", "vrc_chat_send"]
-        register_mcp_tools(tools, mcp=mcp, tool_names=exposed)
-        plan_tools = get_openai_tool_specs(exposed)
-
     if args.fake:
         qwen = FakeQwenClient()
     else:
         qwen = QwenClient(cfg.qwen)
 
-    orch = Orchestrator(
-        qwen=qwen,
-        tools=tools,
-        plan_tools=plan_tools,
-        max_calls_per_turn=cfg.tools.max_calls_per_turn,
-    )
-    out = orch.run_turn_text(args.text)
+    mcp_servers = dict(cfg.mcp.servers) if cfg.mcp.enabled else None
+    orch = GraphOrchestrator(qwen=qwen, tools_cfg=cfg.tools, mcp_servers=mcp_servers)
+    out = orch.run_turn_text_sync(args.text)
 
     log.info(
         "turn_output",

@@ -33,6 +33,7 @@ audio:
 tools:
   enabled: true
   max_calls_per_turn: 8
+  max_concurrency: 5
   whitelist:
     - vrc_set_param
     - vrc_pulse_param

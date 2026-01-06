@@ -30,6 +30,22 @@ vrchat:
     assert "LocalLow/VRChat/VRChat/OSC" in (cfg.vrchat.osc.config_path or "")
 
 
+def test_tools_max_concurrency_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "k_test")
+
+    p = tmp_path / "app.yaml"
+    p.write_text(
+        """
+qwen:
+  api_key: ${DASHSCOPE_API_KEY}
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(p)
+    assert cfg.tools.max_concurrency == 5
+
+
 def test_load_config_missing_env_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
 

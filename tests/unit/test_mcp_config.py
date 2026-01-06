@@ -14,7 +14,7 @@ def _write(tmp_path: Path, text: str) -> Path:
     return p
 
 
-def test_mcp_http_uses_default_url_when_enabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mcp_enabled_requires_servers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHSCOPE_API_KEY", "k_test")
 
     p = _write(
@@ -24,40 +24,16 @@ qwen:
   api_key: ${DASHSCOPE_API_KEY}
 mcp:
   enabled: true
-  transport: http
-""",
-    )
-
-    cfg = load_config(p)
-    assert cfg.mcp.enabled is True
-    assert cfg.mcp.transport == "http"
-    assert cfg.mcp.url == "http://127.0.0.1:8001/mcp"
-    assert cfg.mcp.servers["default"]["transport"] in {"http", "streamable_http"}
-    assert cfg.mcp.servers["default"]["url"] == "http://127.0.0.1:8001/mcp"
-
-
-def test_mcp_http_rejects_empty_url_when_enabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DASHSCOPE_API_KEY", "k_test")
-
-    p = _write(
-        tmp_path,
-        """
-qwen:
-  api_key: ${DASHSCOPE_API_KEY}
-mcp:
-  enabled: true
-  transport: http
-  url: ""
 """,
     )
 
     with pytest.raises(ConfigError) as ei:
         load_config(p)
 
-    assert "mcp.url" in str(ei.value)
+    assert "mcp.servers" in str(ei.value)
 
 
-def test_mcp_http_loads_with_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mcp_disabled_allows_empty_servers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHSCOPE_API_KEY", "k_test")
 
     p = _write(
@@ -66,20 +42,16 @@ def test_mcp_http_loads_with_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 qwen:
   api_key: ${DASHSCOPE_API_KEY}
 mcp:
-  enabled: true
-  transport: http
-  url: http://127.0.0.1:8001/mcp
+  enabled: false
 """,
     )
 
     cfg = load_config(p)
-    assert cfg.mcp.enabled is True
-    assert cfg.mcp.transport == "http"
-    assert cfg.mcp.url == "http://127.0.0.1:8001/mcp"
-    assert cfg.mcp.servers["default"]["url"] == "http://127.0.0.1:8001/mcp"
+    assert cfg.mcp.enabled is False
+    assert cfg.mcp.servers == {}
 
 
-def test_mcp_stdio_requires_command_when_enabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mcp_server_streamable_http_requires_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHSCOPE_API_KEY", "k_test")
 
     p = _write(
@@ -89,17 +61,19 @@ qwen:
   api_key: ${DASHSCOPE_API_KEY}
 mcp:
   enabled: true
-  transport: stdio
+  servers:
+    vrchat:
+      transport: streamable_http
 """,
     )
 
     with pytest.raises(ConfigError) as ei:
         load_config(p)
 
-    assert "mcp.command" in str(ei.value)
+    assert "mcp.servers.vrchat.url" in str(ei.value)
 
 
-def test_mcp_default_transport_is_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mcp_server_stdio_requires_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHSCOPE_API_KEY", "k_test")
 
     p = _write(
@@ -107,8 +81,37 @@ def test_mcp_default_transport_is_http(tmp_path: Path, monkeypatch: pytest.Monke
         """
 qwen:
   api_key: ${DASHSCOPE_API_KEY}
+mcp:
+  enabled: true
+  servers:
+    local:
+      transport: stdio
+""",
+    )
+
+    with pytest.raises(ConfigError) as ei:
+        load_config(p)
+
+    assert "mcp.servers.local.command" in str(ei.value)
+
+
+def test_mcp_server_http_alias_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "k_test")
+
+    p = _write(
+        tmp_path,
+        """
+qwen:
+  api_key: ${DASHSCOPE_API_KEY}
+mcp:
+  enabled: true
+  servers:
+    vrchat:
+      transport: http
+      url: http://127.0.0.1:8001/mcp
 """,
     )
 
     cfg = load_config(p)
-    assert cfg.mcp.transport == "http"
+    assert cfg.mcp.enabled is True
+    assert cfg.mcp.servers["vrchat"]["transport"] == "http"

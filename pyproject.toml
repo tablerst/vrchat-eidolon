@@ -31,7 +31,6 @@ build-backend = "hatchling.build"
 packages = [
 	"src/audio",
 	"src/core",
-	"src/mcp_client",
 	"src/observability",
 	"src/orchestrator",
 	"src/qwen",

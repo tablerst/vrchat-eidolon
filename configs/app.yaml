@@ -33,6 +33,7 @@ audio:
 tools:
   enabled: true
   max_calls_per_turn: 5
+  max_concurrency: 5
   whitelist:
     - echo
     - vrc_status
@@ -50,13 +51,3 @@ mcp:
   #     url: http://127.0.0.1:8001/mcp
   #     # headers:
   #     #   Authorization: Bearer ${MCP_TOKEN}
-  #
-  # Legacy (single server) format is still supported and will be translated into servers.default.
-  transport: http
-  url: http://127.0.0.1:8001/mcp
-  timeout_s: 10
-
-  # Alternative legacy stdio: launch an MCP server as a subprocess.
-  # transport: stdio
-  # command: uv
-  # args: ["run", "vrchat-osc-mcp-server"]

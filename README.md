@@ -22,13 +22,23 @@ Optional (without relying on the installed console script): `uv run python main.
 This repo uses **`langchain-mcp-adapters`** to manage MCP connections and load MCP tools.
 
 - Code path:
-	- MCP wrapper: `src/tools/langchain_mcp_client.py`
-	- Tool bridge + guardrails: `src/tools/mcp_bridge.py`, `src/tools/runtime.py`
+	- LangGraph orchestrator: `src/orchestrator/graph_orchestrator.py`
+	- MCP gateway + local guardrails: `src/tools/mcp_gateway.py`, `src/tools/runtime.py`
+	- Multi-server tool naming: `src/tools/mcp_naming.py`
+	- Dynamic OpenAI tool specs: `src/tools/mcp_specs.py`
+	- ToolResult payload + tool messages: `src/tools/tool_result_codec.py`, `src/tools/tool_messages.py`
 
-Configuration supports both:
+Configuration:
 
-1) **Preferred (multi-server)**: `mcp.servers` (passed through to `MultiServerMCPClient`)
-2) **Legacy (single server)**: `mcp.transport/url/command/args` (auto-translated into `mcp.servers.default`)
+1) **Multi-server**: `mcp.servers` (passed through to `MultiServerMCPClient`)
+2) **Single-server**: still uses `mcp.servers` with exactly one server
+
+Tool naming:
+
+- If there is **one** MCP server, tools keep their original names.
+- If there are **multiple** MCP servers, tools are exposed to the model as:
+  - `{prefix}__{toolName}`
+  - `prefix` is a stable 4-character hash derived from `server_key`, and the first char is guaranteed to be non-numeric.
 
 ## Tests
 
