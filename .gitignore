@@ -10,6 +10,6 @@ wheels/
 .venv
 .idea
 sample.json
-plans
 DESIGN.md
+plans
 PLAN.md

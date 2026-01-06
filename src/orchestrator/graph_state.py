@@ -10,6 +10,7 @@ from core.types import ToolCall, ToolResult
 class AgentState(TypedDict, total=False):
     # Input
     user_text: str
+    user_message: dict[str, Any]
 
     # PLAN outputs
     plan_assistant_text: str

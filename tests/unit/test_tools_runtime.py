@@ -23,6 +23,16 @@ def test_tools_whitelist_blocks() -> None:
     assert set(res.content.keys()) == {"text", "data", "raw", "meta"}
 
 
+def test_tools_empty_whitelist_allows_all() -> None:
+    tools = ToolRegistry(enabled=True, whitelist=[], rate_limits={})
+    tools.register("ok", lambda args: {"echo": args})
+
+    res = tools.execute(tool_call_id="1", name="ok", arguments={"a": 1})
+    assert res.ok is True
+    assert res.content["data"] == {"echo": {"a": 1}}
+    assert set(res.content.keys()) == {"text", "data", "raw", "meta"}
+
+
 def test_tools_rate_limit_blocks() -> None:
     tools = ToolRegistry(enabled=True, whitelist=["ok"], rate_limits={"ok": 0.0})
     tools.register("ok", lambda args: "done")

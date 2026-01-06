@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import time
+import wave
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -16,6 +19,8 @@ from qwen.client import QwenClient
 from tools.mcp_gateway import McpGateway
 from tools.mcp_specs import tool_to_openai_spec
 from tools.tool_messages import tool_message_from_result
+
+from audio.types import AudioSegment
 
 from .graph_state import AgentState
 
@@ -51,15 +56,30 @@ class GraphOrchestrator:
 
         mcp: McpGateway | None = None
         plan_tools: list[dict[str, Any]] | None = None
+        degraded_notice: str = ""
 
         if self._mcp_servers:
             mcp = McpGateway(servers=self._mcp_servers, tools_cfg=self._tools_cfg)
-            await mcp.load()
+            try:
+                await mcp.load()
+            except Exception as e:  # noqa: BLE001
+                # Degrade to chat-only when MCP is unavailable.
+                self._log.warning(
+                    "mcp_unavailable_degraded_to_chat_only",
+                    exc=type(e).__name__,
+                    error_message=str(e),
+                )
+                mcp = None
+                plan_tools = None
+                degraded_notice = "注意：MCP 工具服务当前不可用，已自动降级为纯聊天模式（本轮不会调用任何工具，也无法驱动角色动作）。\n\n"
+            else:
+                # Dynamic: expose loaded MCP tools to the model (only if tools are enabled).
+                if self._tools_cfg.enabled:
+                    plan_tools = [tool_to_openai_spec(b.tool, name_override=b.model_name) for b in mcp.bindings()]
+                else:
+                    plan_tools = None
 
-            # Dynamic: expose all loaded MCP tools to the model.
-            plan_tools = [tool_to_openai_spec(b.tool, name_override=b.model_name) for b in mcp.bindings()]
-
-        graph = self._build_graph(mcp=mcp, plan_tools=plan_tools)
+        graph = self._build_graph(mcp=mcp, plan_tools=plan_tools, degraded_notice=degraded_notice)
 
         t0 = time.perf_counter()
         out_state = cast(
@@ -89,10 +109,104 @@ class GraphOrchestrator:
             tool_results=list(out_state.get("tool_results", [])),
         )
 
+    async def run_turn_audio(self, *, audio: AudioSegment, channels: int = 1, user_text: str = "") -> TurnOutput:
+        """Run a single turn with audio+text input.
+
+        The audio is wrapped into a base64 Data URL WAV payload using the OpenAI-compatible
+        `input_audio` message part format.
+        """
+
+        self._turn_id += 1
+        trace_id = new_trace_id()
+        bind_context(trace_id=trace_id, session_id=self._session_id, turn_id=self._turn_id)
+
+        wav_bytes = self._pcm16le_to_wav_bytes(
+            pcm=audio.pcm,
+            sample_rate=int(audio.sample_rate),
+            channels=int(channels),
+        )
+        b64 = base64.b64encode(wav_bytes).decode("ascii")
+        data_url = f"data:;base64,{b64}"
+
+        user_message: dict[str, Any] = {
+            "role": "user",
+            "content": [
+                {"type": "input_audio", "input_audio": {"data": data_url, "format": "wav"}},
+                {"type": "text", "text": str(user_text)},
+            ],
+        }
+
+        mcp: McpGateway | None = None
+        plan_tools: list[dict[str, Any]] | None = None
+        degraded_notice: str = ""
+
+        if self._mcp_servers:
+            mcp = McpGateway(servers=self._mcp_servers, tools_cfg=self._tools_cfg)
+            try:
+                await mcp.load()
+            except Exception as e:  # noqa: BLE001
+                self._log.warning(
+                    "mcp_unavailable_degraded_to_chat_only",
+                    exc=type(e).__name__,
+                    error_message=str(e),
+                )
+                mcp = None
+                plan_tools = None
+                degraded_notice = "注意：MCP 工具服务当前不可用，已自动降级为纯聊天模式（本轮不会调用任何工具，也无法驱动角色动作）。\n\n"
+            else:
+                if self._tools_cfg.enabled:
+                    plan_tools = [tool_to_openai_spec(b.tool, name_override=b.model_name) for b in mcp.bindings()]
+                else:
+                    plan_tools = None
+
+        graph = self._build_graph(mcp=mcp, plan_tools=plan_tools, degraded_notice=degraded_notice)
+
+        t0 = time.perf_counter()
+        out_state = cast(
+            AgentState,
+            await graph.ainvoke(
+                {
+                    "user_text": str(user_text),
+                    "user_message": user_message,
+                    "executed_calls": 0,
+                    "pending_tool_calls": [],
+                    "batch_tool_calls": [],
+                    "tool_results": [],
+                    "tool_messages": [],
+                    "errors": [],
+                }
+            ),
+        )
+
+        self._log.info(
+            "turn_done",
+            latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+            tool_results=len(out_state.get("tool_results", [])),
+            assistant_text_len=len(out_state.get("assistant_text", "")),
+        )
+
+        return TurnOutput(
+            assistant_text=str(out_state.get("assistant_text", "")),
+            tool_results=list(out_state.get("tool_results", [])),
+        )
+
     def run_turn_text_sync(self, user_text: str) -> TurnOutput:
         return asyncio.run(self.run_turn_text(user_text))
 
-    def _build_graph(self, *, mcp: McpGateway | None, plan_tools: list[dict[str, Any]] | None):
+    def run_turn_audio_sync(self, *, audio: AudioSegment, channels: int = 1, user_text: str = "") -> TurnOutput:
+        return asyncio.run(self.run_turn_audio(audio=audio, channels=channels, user_text=user_text))
+
+    @staticmethod
+    def _pcm16le_to_wav_bytes(*, pcm: bytes, sample_rate: int, channels: int) -> bytes:
+        bio = io.BytesIO()
+        with wave.open(bio, "wb") as wf:
+            wf.setnchannels(int(channels))
+            wf.setsampwidth(2)
+            wf.setframerate(int(sample_rate))
+            wf.writeframes(pcm)
+        return bio.getvalue()
+
+    def _build_graph(self, *, mcp: McpGateway | None, plan_tools: list[dict[str, Any]] | None, degraded_notice: str):
         tools_cfg = self._tools_cfg
         max_calls = max(0, int(tools_cfg.max_calls_per_turn))
         max_conc = max(1, int(getattr(tools_cfg, "max_concurrency", 5)))
@@ -101,12 +215,26 @@ class GraphOrchestrator:
             set_state("PLAN")
             user_text = str(state.get("user_text", ""))
 
+            user_msg = state.get("user_message")
+            if isinstance(user_msg, dict) and user_msg.get("role") == "user":
+                messages: list[dict[str, Any]] = [dict(user_msg)]
+            else:
+                messages = [{"role": "user", "content": user_text}]
+
+            tools_for_plan = plan_tools if plan_tools else None
+            tool_choice: str | dict[str, Any]
+            if tools_for_plan:
+                tool_choice = "auto"
+            else:
+                # Force chat-only planning when no tools are available.
+                tool_choice = "none"
+
             t0 = time.perf_counter()
             plan = await asyncio.to_thread(
                 self._qwen.plan,
-                messages=[{"role": "user", "content": user_text}],
-                tools=plan_tools,
-                tool_choice="auto",
+                messages=messages,
+                tools=tools_for_plan,
+                tool_choice=tool_choice,
                 stream=True,
                 modalities=["text"],
             )
@@ -193,6 +321,12 @@ class GraphOrchestrator:
             user_text = str(state.get("user_text", ""))
             plan_text = str(state.get("plan_assistant_text", ""))
 
+            user_msg = state.get("user_message")
+            if isinstance(user_msg, dict) and user_msg.get("role") == "user":
+                first_user = dict(user_msg)
+            else:
+                first_user = {"role": "user", "content": user_text}
+
             tool_msgs = list(state.get("tool_messages", []))
             # Sort for stability.
             tool_msgs.sort(key=lambda m: str(m.get("tool_call_id", "")))
@@ -201,7 +335,7 @@ class GraphOrchestrator:
                 lambda: list(
                     self._qwen.speak(
                         messages=[
-                            {"role": "user", "content": user_text},
+                            first_user,
                             {"role": "assistant", "content": plan_text},
                             *tool_msgs,
                         ],
@@ -216,7 +350,7 @@ class GraphOrchestrator:
                 if ev.get("type") == "text":
                     text_parts.append(str(ev.get("delta") or ""))
 
-            return {"assistant_text": "".join(text_parts)}
+            return {"assistant_text": f"{degraded_notice}{''.join(text_parts)}"}
 
         builder = StateGraph(AgentState)
         builder.add_node("plan", plan_node)

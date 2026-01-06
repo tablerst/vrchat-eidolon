@@ -12,6 +12,7 @@ dependencies = [
 	"mcp>=1.25.0",
 	"langchain-mcp-adapters>=0.2.1",
 	"langgraph>=1.0.5",
+	"sounddevice>=0.5.3",
 ]
 
 [project.scripts]
