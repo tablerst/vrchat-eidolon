@@ -13,10 +13,12 @@ def _ensure_src_on_path() -> None:
 
 def main() -> int:
     _ensure_src_on_path()
-    from core.cli import main as cli_main
+    from runtime.lifecycle import main as runtime_main
 
-    return int(cli_main())
+    runtime_main()
+    return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

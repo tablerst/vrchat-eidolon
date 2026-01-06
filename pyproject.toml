@@ -13,10 +13,11 @@ dependencies = [
 	"langchain-mcp-adapters>=0.2.1",
 	"langgraph>=1.0.5",
 	"sounddevice>=0.5.3",
+	"langchain-openai>=1.1.6",
 ]
 
 [project.scripts]
-vrchat-eidolon = "core.cli:main"
+vrchat-eidolon = "runtime.lifecycle:main"
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=prepend"]
@@ -30,11 +31,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = [
-	"src/audio",
-	"src/core",
-	"src/observability",
-	"src/orchestrator",
-	"src/qwen",
-	"src/tools",
+	"src/runtime",
+	"src/bus",
+	"src/device_io",
+	"src/llm",
+	"src/mcp",
+	"src/graph",
 ]
+
 
