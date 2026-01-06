@@ -8,8 +8,9 @@ wheels/
 
 # Virtual environments
 .venv
+.env
 .idea
 sample.json
 DESIGN.md
-plans
+# plans
 PLAN.md

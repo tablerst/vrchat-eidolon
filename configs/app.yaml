@@ -34,10 +34,8 @@ tools:
   enabled: true
   max_calls_per_turn: 5
   max_concurrency: 5
-  whitelist:
-    - echo
-    - vrc_status
-    - vrc_chat_send
+  # Allow-all by default: an empty whitelist means all tools are allowed.
+  whitelist: []
   rate_limit:
     vrc_chat_send: 2
 

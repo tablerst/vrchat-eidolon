@@ -15,16 +15,16 @@
 When debugging or adding features, always locate and reason about this chain:
 
 - **Entrypoint**: CLI / `main.py` / session orchestration (LISTEN → PLAN → ACT → SPEAK → UPDATE)
-- **Adapters**: Qwen OpenAI-compat client, streaming tool-call accumulator, audio I/O, MCP tool runtime (client-side)
-- **Guards**: tool allowlist, rate limiting, argument validation, timeouts/retries, and “external service not available” handling
+- **Adapters**: Qwen OpenAI-compat client, streaming tool-call accumulator, audio I/O, MCP client-side runtime
+- **Guards**: tool governance (allow-all by default), rate limiting, argument validation/clamping, timeouts/retries, and “external service not available” handling
 
 Implementation anchors (start here, then branch out):
 
-- Orchestration: `src/orchestrator/graph_orchestrator.py`, `src/orchestrator/graph_state.py`
-- Qwen adapter: `src/qwen/client.py`, `src/qwen/tool_call_accumulator.py`
-- Tool guards: `src/tools/runtime.py`
-- Config: `src/core/config.py`
-- Observability: `src/observability/context.py`, `src/observability/logging.py`
+- Orchestration: `src/runtime/lifecycle.py`, `src/graph/build.py`, `src/graph/state.py`, `src/graph/nodes/*`
+- Qwen adapter: `src/llm/client.py` (and its streamed tool-call accumulation)
+- Tool governance: `src/mcp/policy.py`, `src/mcp/registry.py`
+- Config: `src/config.py`
+- Observability: `src/runtime/logging.py`
 
 > Note: **VRChat OSC is NOT implemented in this repo anymore.**
 > VRChat-related control is provided by an **external MCP service**. This repo focuses on orchestration, safety/guards, and audio.
@@ -70,7 +70,7 @@ Sharp edges (read twice):
 
 - `${ENV_VAR}` expansion is strict: missing/empty env should fail fast with a clear `ConfigError`.
 - `qwen.api_key` may default from `DASHSCOPE_API_KEY`.
-- Prefer explicit tool `whitelist` in configs; an empty whitelist is effectively “allow all”.
+- Prefer explicit tool `whitelist` in configs when you want to restrict tools; an empty whitelist is effectively “allow all”.
 
 ---
 
@@ -84,7 +84,7 @@ Sharp edges (read twice):
 
 Practical notes:
 
-- `src/qwen/client.py` intentionally enforces `stream=True`.
+- `src/llm/client.py` should enforce `stream=True` for all Omni calls.
 - If you see “Missing dependency 'openai'”, fix the environment (not the code): install it via `uv add openai`.
 
 ---
@@ -113,7 +113,11 @@ If you change tool calling, keep these invariants:
 
 Local tool runtime is the first safety boundary.
 
-- Default posture: **deny by default** (enabled + whitelist + per-tool rate limits).
+- Default posture: **allow-all by default** when `tools.whitelist` is empty.
+- Hard safety floor:
+  - Global kill switch: `tools.enabled=false`
+  - Per-tool rate limits (recommended for chatbox / high-frequency tools)
+  - Optional argument validation/clamping
 - Always return a structured `ToolResult` (ok/content/error) and keep failures non-fatal.
 - Add per-turn caps (`tools.max_calls_per_turn`) at the orchestrator layer to prevent runaway loops.
 

@@ -1,8 +1,8 @@
 # vrchat-eidolon
 
-MVP goal: follow the state machine described in `PLAN.md` (LISTEN → PLAN → ACT → SPEAK → UPDATE), and strictly obey `plans/00-shared/01-shared-constraints.md`.
+MVP goal: follow the state machine described in `PLAN.md` (LISTEN → PLAN → ACT → SPEAK → UPDATE).
 
-（中文：MVP 目标是按 `PLAN.md` 的状态机跑通“语音输入 → 工具调用 → 语音输出”的闭环，并严格遵守共享约束。）
+（中文：MVP 目标是按 `PLAN.md` 的状态机跑通“语音输入 → 工具调用 → 输出”的闭环。）
 
 ## Development
 
@@ -15,6 +15,10 @@ MVP goal: follow the state machine described in `PLAN.md` (LISTEN → PLAN → A
 2. Sync dependencies: `uv sync`
 3. Run (preferred): `uv run vrchat-eidolon --config configs/app.yaml`
 
+Notes:
+- `qwen.base_url` defaults to the domestic DashScope OpenAI-compatible endpoint in `configs/*.yaml`.
+	You typically do **not** need `DASHSCOPE_BASE_URL` unless you want to override it.
+
 Optional (without relying on the installed console script): `uv run python main.py --config configs/app.yaml`
 
 ## MCP integration
@@ -22,11 +26,10 @@ Optional (without relying on the installed console script): `uv run python main.
 This repo uses **`langchain-mcp-adapters`** to manage MCP connections and load MCP tools.
 
 - Code path:
-	- LangGraph orchestrator: `src/orchestrator/graph_orchestrator.py`
-	- MCP gateway + local guardrails: `src/tools/mcp_gateway.py`, `src/tools/runtime.py`
-	- Multi-server tool naming: `src/tools/mcp_naming.py`
-	- Dynamic OpenAI tool specs: `src/tools/mcp_specs.py`
-	- ToolResult payload + tool messages: `src/tools/tool_result_codec.py`, `src/tools/tool_messages.py`
+	- Runtime lifecycle (outer loop): `src/runtime/lifecycle.py`
+	- LangGraph tick graph: `src/graph/build.py`, `src/graph/state.py`, `src/graph/nodes/*`
+	- MCP client + registry + policy: `src/mcp/client.py`, `src/mcp/registry.py`, `src/mcp/policy.py`
+	- LLM wrapper (OpenAI-compatible): `src/llm/client.py`
 
 Configuration:
 
@@ -39,6 +42,8 @@ Tool naming:
 - If there are **multiple** MCP servers, tools are exposed to the model as:
   - `{prefix}__{toolName}`
   - `prefix` is a stable 4-character hash derived from `server_key`, and the first char is guaranteed to be non-numeric.
+
+Note: this naming policy is documented in `PLAN.md`. The implementation lives under `src/mcp/`.
 
 ## Tests
 

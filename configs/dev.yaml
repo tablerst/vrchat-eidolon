@@ -1,8 +1,9 @@
 qwen:
   # 推荐写法：从环境变量注入（根目录 .env 仅用于本机开发）
   api_key: ${DASHSCOPE_API_KEY}
-  # 可选覆盖（不写则使用默认 DashScope OpenAI-compat base_url）
-  base_url: ${DASHSCOPE_BASE_URL}
+  # Default to the domestic DashScope OpenAI-compatible base_url.
+  # If you need to override it, edit this file (or create another config).
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   model: qwen3-omni-flash
   timeout_s: 60
   max_retries: 2
@@ -34,10 +35,6 @@ tools:
   enabled: true
   max_calls_per_turn: 8
   max_concurrency: 5
-  whitelist:
-    - vrc_set_param
-    - vrc_pulse_param
-    - vrc_chatbox
-    - vrc_typing
-    - vrc_get_avatar_context
+  # Allow-all by default: an empty whitelist means all tools are allowed.
+  whitelist: []
   rate_limit: {}
