@@ -5,7 +5,7 @@ import os
 import wave
 from pathlib import Path
 
-from audio import MicrophoneAudioCapture
+from audio import MicrophoneAudioCapture, SoundDeviceAudioPlayback, VadParams
 from observability.logging import configure_logging, get_logger
 from orchestrator.graph_orchestrator import GraphOrchestrator
 from qwen.client import FakeQwenClient, QwenClient
@@ -20,6 +20,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--text", default="你好", help="MVP：文本输入")
     p.add_argument("--listen", action="store_true", help="MVP：麦克风 LISTEN（采集一段语音并退出）")
     p.add_argument("--listen-save", default=None, help="可选：把采集到的 utterance 保存为 WAV 文件")
+    p.add_argument("--voice", action="store_true", help="MVP：语音回路（LISTEN -> PLAN(audio) -> SPEAK）")
+    p.add_argument("--no-audio-out", action="store_true", help="语音回路：不播放音频，仅输出文本")
     p.add_argument("--fake", action="store_true", help="使用 FakeQwenClient（离线 stub）")
     return p
 
@@ -46,11 +48,71 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = load_config(args.config)
 
+    vad = VadParams(
+        silence_duration_ms=cfg.audio.vad.silence_duration_ms,
+        min_speech_duration_ms=cfg.audio.vad.min_speech_duration_ms,
+        energy_threshold=cfg.audio.vad.energy_threshold,
+    )
+
+    if args.voice:
+        cap = MicrophoneAudioCapture(
+            device=cfg.audio.input.device,
+            sample_rate=cfg.audio.input.sample_rate,
+            channels=cfg.audio.input.channels,
+            vad=vad,
+        )
+
+        try:
+            seg = cap.next_segment()
+        finally:
+            cap.close()
+
+        log.info(
+            "voice_listen_done",
+            duration_ms=seg.duration_ms,
+            sample_rate=seg.sample_rate,
+            bytes=len(seg.pcm),
+        )
+
+        if args.fake:
+            qwen = FakeQwenClient()
+        else:
+            qwen = QwenClient(cfg.qwen)
+
+        mcp_servers = dict(cfg.mcp.servers) if cfg.mcp.enabled else None
+
+        playback = (
+            SoundDeviceAudioPlayback(
+                device=cfg.audio.output.device,
+                preferred_sample_rate=cfg.audio.output.sample_rate,
+                preferred_channels=cfg.audio.output.channels,
+            )
+            if not args.no_audio_out
+            else None
+        )
+
+        orch = GraphOrchestrator(
+            qwen=qwen,
+            tools_cfg=cfg.tools,
+            mcp_servers=mcp_servers,
+            audio_playback=playback,
+            enable_speak_audio=not args.no_audio_out,
+        )
+
+        out = orch.run_turn_audio_sync(audio=seg, channels=cfg.audio.input.channels, user_text="")
+        log.info(
+            "voice_turn_output",
+            assistant_text=out.assistant_text,
+            tool_results=[r.__dict__ for r in out.tool_results],
+        )
+        return 0
+
     if args.listen:
         cap = MicrophoneAudioCapture(
             device=cfg.audio.input.device,
             sample_rate=cfg.audio.input.sample_rate,
             channels=cfg.audio.input.channels,
+            vad=vad,
         )
         try:
             seg = cap.next_segment()

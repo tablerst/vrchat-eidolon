@@ -21,6 +21,7 @@ from tools.mcp_specs import tool_to_openai_spec
 from tools.tool_messages import tool_message_from_result
 
 from audio.types import AudioSegment
+from audio.playback import AudioPlayback, NullAudioPlayback
 
 from .graph_state import AgentState
 
@@ -40,10 +41,14 @@ class GraphOrchestrator:
         qwen: QwenClient,
         tools_cfg: ToolsConfig,
         mcp_servers: dict[str, dict[str, Any]] | None = None,
+        audio_playback: AudioPlayback | None = None,
+        enable_speak_audio: bool = False,
     ) -> None:
         self._qwen = qwen
         self._tools_cfg = tools_cfg
         self._mcp_servers = dict(mcp_servers or {})
+        self._audio_playback = audio_playback or NullAudioPlayback()
+        self._enable_speak_audio = bool(enable_speak_audio)
 
         self._session_id = new_session_id()
         self._turn_id = 0
@@ -331,26 +336,40 @@ class GraphOrchestrator:
             # Sort for stability.
             tool_msgs.sort(key=lambda m: str(m.get("tool_call_id", "")))
 
-            chunks = await asyncio.to_thread(
-                lambda: list(
-                    self._qwen.speak(
+            def _consume() -> str:
+                text_parts: list[str] = []
+                playback = self._audio_playback
+
+                if self._enable_speak_audio:
+                    playback.start()
+
+                try:
+                    for ev in self._qwen.speak(
                         messages=[
                             first_user,
                             {"role": "assistant", "content": plan_text},
                             *tool_msgs,
                         ],
                         stream=True,
-                        modalities=["text"],
-                    )
-                )
-            )
+                        modalities=(
+                            ["text", "audio"]
+                            if self._enable_speak_audio
+                            else ["text"]
+                        ),
+                    ):
+                        if ev.get("type") == "text":
+                            text_parts.append(str(ev.get("delta") or ""))
+                        elif self._enable_speak_audio and ev.get("type") == "audio":
+                            playback.push_audio_b64(str(ev.get("delta") or ""))
+                finally:
+                    if self._enable_speak_audio:
+                        playback.close()
 
-            text_parts: list[str] = []
-            for ev in chunks:
-                if ev.get("type") == "text":
-                    text_parts.append(str(ev.get("delta") or ""))
+                return "".join(text_parts)
 
-            return {"assistant_text": f"{degraded_notice}{''.join(text_parts)}"}
+            text = await asyncio.to_thread(_consume)
+
+            return {"assistant_text": f"{degraded_notice}{text}"}
 
         builder = StateGraph(AgentState)
         builder.add_node("plan", plan_node)
