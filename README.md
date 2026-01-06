@@ -28,7 +28,7 @@ This repo uses **`langchain-mcp-adapters`** to manage MCP connections and load M
 - Code path:
 	- Runtime lifecycle (outer loop): `src/runtime/lifecycle.py`
 	- LangGraph tick graph: `src/graph/build.py`, `src/graph/state.py`, `src/graph/nodes/*`
-	- MCP client + registry + policy: `src/mcp/client.py`, `src/mcp/registry.py`, `src/mcp/policy.py`
+	- MCP client + registry + policy: `src/eidolon_mcp/client.py`, `src/eidolon_mcp/registry.py`, `src/eidolon_mcp/policy.py`
 	- LLM wrapper (OpenAI-compatible): `src/llm/client.py`
 
 Configuration:
@@ -43,7 +43,7 @@ Tool naming:
   - `{prefix}__{toolName}`
   - `prefix` is a stable 4-character hash derived from `server_key`, and the first char is guaranteed to be non-numeric.
 
-Note: this naming policy is documented in `PLAN.md`. The implementation lives under `src/mcp/`.
+Note: this naming policy is documented in `PLAN.md`. The implementation lives under `src/eidolon_mcp/`.
 
 ## Tests
 

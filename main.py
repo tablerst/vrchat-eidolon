@@ -8,7 +8,8 @@ def _ensure_src_on_path() -> None:
     root = Path(__file__).resolve().parent
     src = root / "src"
     if src.exists():
-        sys.path.insert(0, str(src))
+        # Append (not prepend) to avoid shadowing third-party packages.
+        sys.path.append(str(src))
 
 
 def main() -> int:

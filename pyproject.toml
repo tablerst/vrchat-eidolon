@@ -35,8 +35,13 @@ packages = [
 	"src/bus",
 	"src/device_io",
 	"src/llm",
-	"src/mcp",
+	"src/eidolon_mcp",
 	"src/graph",
+]
+
+# Include top-level modules under src/ (e.g. config.py, app.py).
+include = [
+	"src/*.py",
 ]
 
 

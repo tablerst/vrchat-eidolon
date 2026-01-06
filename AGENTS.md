@@ -22,7 +22,7 @@ Implementation anchors (start here, then branch out):
 
 - Orchestration: `src/runtime/lifecycle.py`, `src/graph/build.py`, `src/graph/state.py`, `src/graph/nodes/*`
 - Qwen adapter: `src/llm/client.py` (and its streamed tool-call accumulation)
-- Tool governance: `src/mcp/policy.py`, `src/mcp/registry.py`
+- Tool governance: `src/eidolon_mcp/policy.py`, `src/eidolon_mcp/registry.py`
 - Config: `src/config.py`
 - Observability: `src/runtime/logging.py`
 
