@@ -12,6 +12,8 @@ wheels/
 .env
 .idea
 sample.json
+/configs/dev.yaml
+
 plans
 DESIGN.md
 PLAN.md
