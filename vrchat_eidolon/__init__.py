@@ -1,0 +1,10 @@
+"""VRChat Eidolon package.
+
+Developer-facing docs are English-first. See AGENTS.md.
+"""
+
+from __future__ import annotations
+
+__all__ = ["__version__"]
+
+__version__ = "0.1.0"
