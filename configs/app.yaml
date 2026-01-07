@@ -13,6 +13,13 @@ qwen:
     model: qwen3-omni-flash-realtime
     voice: Cherry
     instructions: You are a helpful assistant.
+    # Realtime wire audio format is not fully configurable via session.update.
+    # DashScope reference samples use: input 16 kHz mono PCM16, output 24 kHz mono.
+    # The app will resample between your device rate and these wire rates.
+    input_sample_rate_hz: 16000
+    output_sample_rate_hz: 24000
+    input_channels: 1
+    output_channels: 1
     turn_detection:
       # server VAD threshold in [0, 1]
       threshold: 0.5

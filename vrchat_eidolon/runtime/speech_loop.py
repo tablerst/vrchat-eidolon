@@ -37,6 +37,11 @@ async def run_speech_loop(cfg: Mapping[str, Any]) -> None:
     instructions = _get(cfg, "qwen.realtime.instructions", "You are a helpful assistant.")
     turn_threshold = float(_get(cfg, "qwen.realtime.turn_detection.threshold", 0.5))
 
+    wire_in_rate = int(_get(cfg, "qwen.realtime.input_sample_rate_hz", 16000))
+    wire_out_rate = int(_get(cfg, "qwen.realtime.output_sample_rate_hz", 24000))
+    wire_in_channels = int(_get(cfg, "qwen.realtime.input_channels", 1))
+    wire_out_channels = int(_get(cfg, "qwen.realtime.output_channels", 1))
+
     sample_rate_in = int(_get(cfg, "audio.input.sample_rate", 48000))
     channels_in = int(_get(cfg, "audio.input.channels", 1))
     device_in = _get(cfg, "audio.input.device", None)
@@ -56,6 +61,10 @@ async def run_speech_loop(cfg: Mapping[str, Any]) -> None:
             "voice": voice,
             "chunk_ms": chunk_ms,
             "silence_duration_ms": silence_duration_ms,
+            "wire_in_rate_hz": wire_in_rate,
+            "wire_out_rate_hz": wire_out_rate,
+            "device_in_rate_hz": sample_rate_in,
+            "device_out_rate_hz": sample_rate_out,
         },
     )
 
@@ -66,6 +75,10 @@ async def run_speech_loop(cfg: Mapping[str, Any]) -> None:
         instructions=str(instructions),
         turn_threshold=turn_threshold,
         silence_duration_ms=silence_duration_ms,
+        input_sample_rate_hz=wire_in_rate,
+        output_sample_rate_hz=wire_out_rate,
+        input_channels=wire_in_channels,
+        output_channels=wire_out_channels,
     )
 
     in_cfg = AudioInputConfig(

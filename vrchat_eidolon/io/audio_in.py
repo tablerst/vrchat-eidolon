@@ -37,6 +37,18 @@ class AudioInput:
         self._stream: sd.RawInputStream | None = None
         self._dropped = 0
 
+    @property
+    def device(self) -> str | int | None:
+        return self._cfg.device
+
+    @property
+    def sample_rate(self) -> int:
+        return self._cfg.sample_rate
+
+    @property
+    def channels(self) -> int:
+        return self._cfg.channels
+
     def start(self) -> None:
         blocksize = int(self._cfg.sample_rate * self._cfg.chunk_ms / 1000)
 

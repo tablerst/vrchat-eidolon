@@ -20,7 +20,12 @@ class AudioOutputConfig:
 
 
 def _pcm24le_to_int32le(pcm24: bytes) -> bytes:
-    """Convert PCM24LE packed bytes to PCM32LE bytes with sign extension."""
+    """Convert PCM24LE packed bytes to PCM32LE (int32) bytes.
+
+    We *left-justify* 24-bit samples in the 32-bit container (i.e. shift left
+    by 8 bits). This matches common "24-bit in 32-bit" conventions and avoids
+    playback being ~48 dB too quiet.
+    """
 
     if len(pcm24) % 3 != 0:
         raise ValueError(f"pcm24 length must be multiple of 3, got {len(pcm24)}")
@@ -31,10 +36,12 @@ def _pcm24le_to_int32le(pcm24: bytes) -> bytes:
         b0 = pcm24[i]
         b1 = pcm24[i + 1]
         b2 = pcm24[i + 2]
-        out[j] = b0
-        out[j + 1] = b1
-        out[j + 2] = b2
-        out[j + 3] = 0xFF if (b2 & 0x80) else 0x00
+        # PCM24LE is packed as: [LSB, mid, MSB]. To left-justify into int32,
+        # we write: [0x00, LSB, mid, MSB].
+        out[j] = 0x00
+        out[j + 1] = b0
+        out[j + 2] = b1
+        out[j + 3] = b2
         j += 4
     return bytes(out)
 
@@ -60,6 +67,18 @@ class AudioOutputSink:
         self._play_epoch = 0
         self._awaiting_play_epoch: int | None = None
         self._play_started_q: asyncio.Queue[int] = asyncio.Queue()
+
+    @property
+    def device(self) -> str | int | None:
+        return self._cfg.device
+
+    @property
+    def sample_rate(self) -> int:
+        return self._cfg.sample_rate
+
+    @property
+    def channels(self) -> int:
+        return self._cfg.channels
 
     def start(self, *, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop

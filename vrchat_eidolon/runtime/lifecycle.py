@@ -17,6 +17,26 @@ from vrchat_eidolon.runtime.speech_loop import run_speech_loop
 logger = logging.getLogger(__name__)
 
 
+def _redact_secrets(obj):  # noqa: ANN001
+    """Best-effort redaction for human-facing config dumps.
+
+    We keep config loading strict and fail-fast, but `print-config` should not
+    echo secrets (API keys, tokens) to stdout by default.
+    """
+
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if isinstance(k, str) and any(p in k.lower() for p in ("api_key", "token", "secret", "password")):
+                out[k] = "<redacted>"
+            else:
+                out[k] = _redact_secrets(v)
+        return out
+    if isinstance(obj, list):
+        return [_redact_secrets(x) for x in obj]
+    return obj
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vrchat-eidolon",
@@ -108,7 +128,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
         if ns.command == "print-config":
-            sys.stdout.write(json.dumps(cfg, ensure_ascii=False, indent=2))
+            sys.stdout.write(json.dumps(_redact_secrets(cfg), ensure_ascii=False, indent=2))
             sys.stdout.write("\n")
             return 0
 

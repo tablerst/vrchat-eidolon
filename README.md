@@ -32,6 +32,24 @@ Defaults (configurable in `configs/app.yaml`):
 
 If you use VB-CABLE or a virtual device, set `audio.output.device` in `configs/dev.yaml`.
 
+### Audio sample rates (important)
+
+If Realtime can hear you and returns text, but the audio you hear sounds like **garbled noise**, it is almost always a **sample-rate mismatch**.
+
+The DashScope reference implementation for Omni Realtime uses:
+
+- **Input:** 16 kHz, mono, PCM16
+- **Output:** 24 kHz, mono (for `qwen3-omni-flash-realtime` output is `pcm24`)
+
+Windows “Device Properties → Format” can show much higher rates (e.g. 96 kHz / 192 kHz). That is the *device mix format*, not necessarily the model wire format.
+
+This repo will automatically resample between your device rates (`audio.input.sample_rate` / `audio.output.sample_rate`) and the model wire rates configured in:
+
+- `qwen.realtime.input_sample_rate_hz` (default 16000)
+- `qwen.realtime.output_sample_rate_hz` (default 24000)
+
+If you still hear noise, try adjusting `qwen.realtime.output_sample_rate_hz` to match the model output you observe (common alternatives are 24000 or 48000).
+
 ## Tests
 
 - `uv run pytest`

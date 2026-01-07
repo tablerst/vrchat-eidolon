@@ -14,6 +14,7 @@ import websockets
 from vrchat_eidolon.core.clock import TurnTtfa, monotonic_ms
 from vrchat_eidolon.io.audio_in import AudioInput
 from vrchat_eidolon.io.audio_out import AudioOutputSink
+from vrchat_eidolon.io.rate_convert import PcmRateConverter
 
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,16 @@ class QwenRealtimeConfig:
     silence_duration_ms: int = 500
     input_audio_format: str = "pcm16"
     output_audio_format: str = "pcm24"
+
+    # Wire-format rates are not configurable in session.update. The official
+    # DashScope samples for Omni Realtime use 16 kHz input and 24 kHz output.
+    # We therefore resample locally when device rates differ.
+    input_sample_rate_hz: int = 16000
+    output_sample_rate_hz: int = 24000
+
+    # Qwen Realtime audio is mono in the reference samples.
+    input_channels: int = 1
+    output_channels: int = 1
     session_max_age_s: int = 28 * 60
 
 
@@ -68,6 +79,46 @@ class QwenRealtimeClient:
         # Track TTFA per item_id (turn).
         turns: dict[str, TurnTtfa] = {}
         pending_play_turns: deque[str] = deque()
+
+        # Best-effort audio mapping to avoid the classic "garbled noise" symptom
+        # when device sample rates don't match the model wire format.
+        in_converter: PcmRateConverter | None = None
+        if audio_in.sample_rate != self._cfg.input_sample_rate_hz or audio_in.channels != self._cfg.input_channels:
+            in_converter = PcmRateConverter(
+                sample_width_bytes=2,
+                in_channels=audio_in.channels,
+                in_sample_rate_hz=audio_in.sample_rate,
+                out_channels=self._cfg.input_channels,
+                out_sample_rate_hz=self._cfg.input_sample_rate_hz,
+            )
+            logger.warning(
+                "audio_in_adapt",
+                extra={
+                    "device_rate_hz": audio_in.sample_rate,
+                    "device_channels": audio_in.channels,
+                    "wire_rate_hz": self._cfg.input_sample_rate_hz,
+                    "wire_channels": self._cfg.input_channels,
+                },
+            )
+
+        out_converter: PcmRateConverter | None = None
+        if audio_out.sample_rate != self._cfg.output_sample_rate_hz or audio_out.channels != self._cfg.output_channels:
+            out_converter = PcmRateConverter(
+                sample_width_bytes=3,
+                in_channels=self._cfg.output_channels,
+                in_sample_rate_hz=self._cfg.output_sample_rate_hz,
+                out_channels=audio_out.channels,
+                out_sample_rate_hz=audio_out.sample_rate,
+            )
+            logger.warning(
+                "audio_out_adapt",
+                extra={
+                    "wire_rate_hz": self._cfg.output_sample_rate_hz,
+                    "wire_channels": self._cfg.output_channels,
+                    "device_rate_hz": audio_out.sample_rate,
+                    "device_channels": audio_out.channels,
+                },
+            )
 
         async def _play_tracker() -> None:
             while True:
@@ -120,7 +171,11 @@ class QwenRealtimeClient:
 
             async def _sender() -> None:
                 async for chunk in audio_in.chunks():
-                    b64 = base64.b64encode(chunk).decode("ascii")
+                    send_chunk = chunk
+                    if in_converter is not None:
+                        send_chunk = in_converter.convert(send_chunk)
+
+                    b64 = base64.b64encode(send_chunk).decode("ascii")
                     await ws.send(
                         json.dumps(
                             {
@@ -177,6 +232,8 @@ class QwenRealtimeClient:
                             continue
 
                         pcm24 = base64.b64decode(delta)
+                        if out_converter is not None:
+                            pcm24 = out_converter.convert(pcm24)
                         audio_out.append_pcm24(pcm24)
 
                         if isinstance(item_id, str):
