@@ -12,43 +12,54 @@ Import policy (important):
 
 ---
 
+## Architecture guardrails (read twice)
+
+- **Dual-loop architecture** is intentional:
+  - **Speech Loop**: low-latency audio I/O via Qwen-Omni-Realtime (WebSocket).
+  - **Action Loop**: planning + tool execution (MCP) orchestrated at turn-level.
+- **Do not put millisecond-level audio streaming inside LangGraph.** LangGraph is for turn-level control flow, fan-out tool execution, and state management.
+- **Speak before act** is enforced by a latch/gate (no sleeps): do not execute “heavy” tools (move/turn/large gestures) until the first audio has actually started playing.
+- **VRChat control is external**: this repo is an MCP *client* and orchestrator. Do not implement a VRChat OSC/MCP server inside this repository.
+
+---
+
+## Python code style & performance (read twice)
+
+- Target Python version is **3.12+** (see `pyproject.toml`). Prefer modern stdlib idioms.
+- Use **type hints** for public interfaces and cross-module boundaries.
+- Prefer **small, explicit data objects** for events/state.
+  - Use `@dataclass(slots=True)` for simple records (events, config structs) when it improves memory/perf.
+  - Avoid overly clever metaprogramming; prioritize readability in hot paths.
+- Be mindful of the **audio hot path**:
+  - Avoid blocking calls and avoid excessive allocations/copies.
+  - Prefer `memoryview`/bytes slices and explicit buffer boundaries.
+- Logging:
+  - Prefer structured logs.
+  - Avoid `print()` in library code (tests/prototyping only).
+
+---
+
+## Concurrency & cancellation (read twice)
+
+- Prefer **structured concurrency** for long-lived tasks:
+  - Use `asyncio.TaskGroup` where possible.
+  - Ensure clean cancellation and resource teardown (sockets, devices, sessions).
+- **Never block the event loop** from audio callbacks:
+  - Treat audio callbacks as real-time: do minimal work and hand off via a thread-safe queue.
+  - Bridge thread → asyncio using `loop.call_soon_threadsafe(...)` (or equivalent).
+- Backpressure must be explicit:
+  - Use **bounded** queues.
+  - Define drop strategy: typically **drop old frames** (vision) but avoid dropping audio unless explicitly acceptable.
+- Tool fan-out must be bounded:
+  - Enforce a concurrency cap (e.g., semaphore).
+  - Tool execution should be cancelable, but must always clean up sessions/resources.
+- Shared state:
+  - Prefer message passing (events) over shared mutable state.
+  - If using LangGraph state reducers, ensure merges are deterministic.
+
+---
+
 ## Dev environment tips (avoid “guess-and-fix”)
-
-### The “Context Triple”: entrypoint → adapters → guards
-
-When debugging or adding features, always locate and reason about this chain:
-
-- **Entrypoint**: CLI / `main.py` / session orchestration (LISTEN → PLAN → ACT → SPEAK → UPDATE)
-- **Adapters**: Qwen OpenAI-compat client, streaming tool-call accumulator, audio I/O, MCP client-side runtime
-- **Guards**: tool governance (allow-all by default), rate limiting, argument validation/clamping, timeouts/retries, and “external service not available” handling
-
-Implementation anchors (start here, then branch out):
-
-- Orchestration: `vrchat_eidolon/runtime/lifecycle.py`, `vrchat_eidolon/graph/build.py`, `vrchat_eidolon/graph/state.py`, `vrchat_eidolon/graph/nodes/*`
-- Qwen adapter: `vrchat_eidolon/llm/client.py` (and its streamed tool-call accumulation)
-- Tool governance: `vrchat_eidolon/mcp/policy.py`, `vrchat_eidolon/mcp/registry.py`
-- Config: `vrchat_eidolon/config.py`
-- Observability: `vrchat_eidolon/runtime/logging.py`
-
-> Note: **VRChat OSC is NOT implemented in this repo anymore.**
-> VRChat-related control is provided by an **external MCP service**. This repo focuses on orchestration, safety/guards, and audio.
-
-### Write 3 verifiable assertions before changing code
-
-Before making any fixes, write down (or encode as tests) at least 3 assertions:
-
-1. Expected behavior (happy path)
-2. Boundary case(s)
-3. Failure mode(s) and the desired recovery behavior
-
-### Observe first, tune later
-
-On the critical path, ensure logs/metrics include at least:
-
-- `trace_id`, `session_id`, `turn_id`
-- `state` (PLAN/ACT/SPEAK…)
-- latency (model latency, tool latency)
-- tool execution outcomes
 
 ---
 
@@ -62,6 +73,10 @@ On the critical path, ensure logs/metrics include at least:
   - Add dependency: `uv add <package>`
   - Add dev dependency: `uv add --dev <package>`
 
+Notes:
+
+- Keep `pyproject.toml` and `uv.lock` consistent (always use `uv add` / `uv sync`).
+
 ---
 
 ## Configuration strategy
@@ -74,119 +89,44 @@ Sharp edges (read twice):
 
 - `${ENV_VAR}` expansion is strict: missing/empty env should fail fast with a clear `ConfigError`.
 - `qwen.api_key` may default from `DASHSCOPE_API_KEY`.
-- Prefer explicit tool `whitelist` in configs when you want to restrict tools; an empty whitelist is effectively “allow all”.
 
 ---
 
-## Qwen-Omni hard constraints (do not violate)
+## Qwen model constraints (do not violate)
+
+### Qwen-Omni (Chat Completions)
 
 - **Must use `stream=True`**.
-- **One request may include text + only one other modality**.
-- Recommended two-phase design:
-  - **PLAN**: `modalities=["text"]` (focus on tool calls)
-  - **SPEAK**: `modalities=["text","audio"]` (final speech)
+- **One user message may include text + only one other modality** (image OR audio OR video).
+- **Thinking mode and audio output are incompatible**:
+  - When `enable_thinking=true`, audio output is not supported.
 
-Practical notes:
+Recommended two-phase design:
 
-- `vrchat_eidolon/llm/client.py` should enforce `stream=True` for all Omni calls.
-- If you see “Missing dependency 'openai'”, fix the environment (not the code): install it via `uv add openai`.
+- **PLAN**: `modalities=["text"]` (focus on tool calls; deterministic, parseable output)
+- **SPEAK**: `modalities=["text","audio"]` (final speech; speak-first UX)
 
----
+### Qwen-Omni-Realtime (WebSocket)
 
-## Streaming tool-call accumulation
-
-Tool-call `arguments` may arrive split across multiple streaming chunks.
-
-- Do **not** parse half JSON.
-- Accumulate per `tool_call_id` until the JSON becomes parseable.
-- Log useful debug context:
-  - accumulated length per tool_call_id
-  - last JSON decode error (message + position)
-
-Rule of thumb: treat tool-call JSON as a stream, not a value.
-
-If you change tool calling, keep these invariants:
-
-- Accumulate by `tool_call_id`.
-- Probe parseability for logging only.
-- Only execute tools from fully-parsed dict arguments.
+- Use WebSocket Realtime for low-latency audio streaming.
+- Prefer **server-side VAD**: `turn_detection.type=server_vad`.
+- Output modalities are `['text']` or `['text','audio']`.
+- Audio formats:
+  - Input audio is **pcm16**.
+  - `qwen3-omni-flash-realtime` output audio format is **pcm24**.
+- Images:
+  - JPG/JPEG only.
+  - **≤ 500 KB before Base64 encoding**.
+  - Recommended 480p/720p; **~1 FPS**.
+  - **Must send at least one `input_audio_buffer.append` before `input_image_buffer.append`.**
+  - Image buffer is submitted along with audio buffer on commit.
+- A single Realtime session has a **maximum lifetime (~30 minutes)**. Implement session rotation / reconnect.
 
 ---
-
-## Tools: safety defaults
-
-Local tool runtime is the first safety boundary.
-
-- Default posture: **allow-all by default** when `tools.whitelist` is empty.
-- Hard safety floor:
-  - Global kill switch: `tools.enabled=false`
-  - Per-tool rate limits (recommended for chatbox / high-frequency tools)
-  - Optional argument validation/clamping
-- Always return a structured `ToolResult` (ok/content/error) and keep failures non-fatal.
-- Add per-turn caps (`tools.max_calls_per_turn`) at the orchestrator layer to prevent runaway loops.
-
-Tool naming note:
-
-- Model-facing names must be OpenAI-safe (letters/digits/underscore/hyphen).
-- MCP tool names are unified and OpenAI-compatible (e.g. `vrc_chat_send`).
-
----
-
-## Windows audio pitfalls (common failures)
-
-- If using VB-CABLE: keep everything at **48kHz** (device sample-rate mismatches often cause pitch shifts, crackling, or stutter).
-- If audio is silent:
-  - verify the output device selected by the app
-  - verify the input device selected by VRChat (or the target app)
-  - check exclusive-mode settings in Windows sound control panel
-
----
-
-## LangGraph (optional but recommended for scale)
-
-Consider introducing LangGraph when:
-
-- you need controlled tool loops (retry/clarify/degrade)
-- you want explicit branching and error recovery
-- orchestration complexity is growing beyond a simple state machine
-
-Keep adoption incremental:
-
-- start with a small graph that mirrors PLAN → ACT → SPEAK
-- keep observability fields stable (`trace_id/session_id/turn_id/state`)
-- gate it behind a config flag to avoid breaking existing flows
-
-Non-negotiable: keep observability fields stable (`trace_id/session_id/turn_id/state`) across refactors.
-
----
-
 ## Testing instructions
 
 - Run tests:
   - `uv run pytest`
 
-Tip: prioritize unit tests for streaming accumulation, tool guards (allowlist/rate limit), and orchestration edge cases.
-
 ---
 
-## PR instructions
-
-### Commit message convention
-
-Commit messages must follow Angular convention: `type(scope): subject`.
-
-Suggested scopes:
-
-- `orchestrator` / `tools` / `audio` / `qwen` / `mcp` / `langgraph` / `docs`
-
-Examples:
-
-- `fix(qwen): accumulate streamed tool_call arguments safely`
-- `feat(tools): add allowlist and per-tool rate limit`
-- `feat(langgraph): add graph-based orchestrator behind flag`
-- `docs(plan): remove OSC implementation steps`
-
-### Keep PRs small and reviewable
-
-- One intent per PR.
-- The PR description should answer: what changed, why, and how it was verified (command + key scenarios).

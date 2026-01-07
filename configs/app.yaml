@@ -7,15 +7,6 @@ qwen:
   timeout_s: 30
   max_retries: 3
 
-vrchat:
-  osc:
-    send_host: 127.0.0.1
-    send_port: 9000
-    recv_host: 0.0.0.0
-    recv_port: 9001
-    # Windows 默认：%APPDATA%\..\LocalLow\VRChat\VRChat\OSC
-    config_path: ${APPDATA}/../LocalLow/VRChat/VRChat/OSC
-
 audio:
   input:
     device: null

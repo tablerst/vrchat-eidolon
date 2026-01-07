@@ -12,6 +12,6 @@ wheels/
 .env
 .idea
 sample.json
-DESIGN.md
-# plans
-PLAN.md
+# DESIGN.md
+plans
+# PLAN.md

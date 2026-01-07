@@ -1,21 +1,11 @@
+# 可版本化的主配置（敏感信息用环境变量注入）
+
 qwen:
-  # 推荐写法：从环境变量注入（根目录 .env 仅用于本机开发）
   api_key: ${DASHSCOPE_API_KEY}
-  # Default to the domestic DashScope OpenAI-compatible base_url.
-  # If you need to override it, edit this file (or create another config).
   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   model: qwen3-omni-flash
-  timeout_s: 60
-  max_retries: 2
-
-vrchat:
-  osc:
-    send_host: 127.0.0.1
-    send_port: 9000
-    recv_host: 0.0.0.0
-    recv_port: 9001
-    # Windows 默认：%APPDATA%\..\LocalLow\VRChat\VRChat\OSC
-    config_path: ${APPDATA}/../LocalLow/VRChat/VRChat/OSC
+  timeout_s: 30
+  max_retries: 3
 
 audio:
   input:
@@ -23,18 +13,30 @@ audio:
     sample_rate: 48000
     channels: 1
   output:
-    device: null
+    device: CABLE Input
     sample_rate: 48000
     channels: 1
   vad:
-    silence_duration_ms: 600
+    silence_duration_ms: 500
     min_speech_duration_ms: 300
-    energy_threshold: 0.015
+    energy_threshold: 0.02
 
 tools:
   enabled: true
-  max_calls_per_turn: 8
+  max_calls_per_turn: 5
   max_concurrency: 5
   # Allow-all by default: an empty whitelist means all tools are allowed.
   whitelist: []
-  rate_limit: {}
+  rate_limit:
+    vrc_chat_send: 2
+
+# External VRChat control is provided by an MCP server (not implemented in this repo).
+mcp:
+  enabled: false
+  # Preferred: multi-server config passed to langchain-mcp-adapters MultiServerMCPClient.
+  # servers:
+  #   vrchat:
+  #     transport: streamable_http
+  #     url: http://127.0.0.1:8001/mcp
+  #     # headers:
+  #     #   Authorization: Bearer ${MCP_TOKEN}
