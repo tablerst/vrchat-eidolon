@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import audioop
 import base64
 import json
 import logging
@@ -104,7 +105,8 @@ class QwenRealtimeClient:
         out_converter: PcmRateConverter | None = None
         if audio_out.sample_rate != self._cfg.output_sample_rate_hz or audio_out.channels != self._cfg.output_channels:
             out_converter = PcmRateConverter(
-                sample_width_bytes=3,
+                # We down-convert to PCM16LE locally for stable playback.
+                sample_width_bytes=2,
                 in_channels=self._cfg.output_channels,
                 in_sample_rate_hz=self._cfg.output_sample_rate_hz,
                 out_channels=audio_out.channels,
@@ -187,6 +189,36 @@ class QwenRealtimeClient:
                     )
 
             async def _receiver() -> None:
+                # The model streams base64-encoded PCM bytes. Deltas may split
+                # arbitrarily, so we must preserve sample alignment.
+                #
+                # Docs say output is PCM24; in practice, some stacks represent
+                # 24-bit audio as "24-in-32" (4 bytes/sample with the lowest
+                # byte often being 0x00). We auto-detect once per session.
+                pcm_tail = bytearray()
+                container_bytes_per_sample: int | None = None
+
+                def _detect_container_bytes(buf: bytearray) -> int | None:
+                    # Need enough data to get a stable ratio.
+                    if len(buf) < 4096:
+                        return None
+                    # If interpreted as 24-in-32, every 4th byte (the least
+                    # significant byte) is frequently 0x00.
+                    zeros = 0
+                    total = 0
+                    for i in range(0, min(len(buf) - (len(buf) % 4), 16384), 4):
+                        total += 1
+                        if buf[i] == 0x00:
+                            zeros += 1
+                    if total == 0:
+                        return None
+                    ratio = zeros / total
+                    if ratio > 0.85:
+                        logger.info("audio_out_pcm_container_detected", extra={"container_bytes": 4, "lsb0_ratio": ratio})
+                        return 4
+                    logger.info("audio_out_pcm_container_detected", extra={"container_bytes": 3, "lsb0_ratio": ratio})
+                    return 3
+
                 async for msg in ws:
                     data = json.loads(msg)
                     typ = data.get("type")
@@ -231,10 +263,31 @@ class QwenRealtimeClient:
                         if not isinstance(delta, str):
                             continue
 
-                        pcm24 = base64.b64decode(delta)
+                        pcm_tail.extend(base64.b64decode(delta))
+                        if not pcm_tail:
+                            continue
+
+                        if container_bytes_per_sample is None:
+                            container_bytes_per_sample = _detect_container_bytes(pcm_tail)
+                            if container_bytes_per_sample is None:
+                                continue
+
+                        frame_bytes_wire = container_bytes_per_sample * self._cfg.output_channels
+
+                        # Only process full frames to avoid byte misalignment.
+                        n = (len(pcm_tail) // frame_bytes_wire) * frame_bytes_wire
+                        if n <= 0:
+                            continue
+
+                        pcm = bytes(pcm_tail[:n])
+                        del pcm_tail[:n]
+
+                        # Down-convert to PCM16LE for playback stability.
+                        pcm16 = audioop.lin2lin(pcm, container_bytes_per_sample, 2)
                         if out_converter is not None:
-                            pcm24 = out_converter.convert(pcm24)
-                        audio_out.append_pcm24(pcm24)
+                            pcm16 = out_converter.convert(pcm16)
+
+                        audio_out.append_pcm16(pcm16)
 
                         if isinstance(item_id, str):
                             t = turns.get(item_id)

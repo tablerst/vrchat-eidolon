@@ -36,6 +36,7 @@ class AudioInput:
         self._q: queue.Queue[bytes] = queue.Queue(maxsize=cfg.queue_max_chunks)
         self._stream: sd.RawInputStream | None = None
         self._dropped = 0
+        self._effective_sample_rate: int | None = None
 
     @property
     def device(self) -> str | int | None:
@@ -43,7 +44,7 @@ class AudioInput:
 
     @property
     def sample_rate(self) -> int:
-        return self._cfg.sample_rate
+        return self._effective_sample_rate or self._cfg.sample_rate
 
     @property
     def channels(self) -> int:
@@ -78,11 +79,20 @@ class AudioInput:
             callback=_callback,
         )
         self._stream.start()
+
+        # PortAudio / host API may negotiate a different samplerate than requested.
+        # Expose it to downstream resamplers to avoid pitch shift.
+        try:
+            self._effective_sample_rate = int(getattr(self._stream, "samplerate"))
+        except Exception:  # noqa: BLE001
+            self._effective_sample_rate = None
+
         logger.info(
             "audio_in_started",
             extra={
                 "device": self._cfg.device,
                 "sample_rate": self._cfg.sample_rate,
+                "effective_sample_rate": self.sample_rate,
                 "channels": self._cfg.channels,
                 "chunk_ms": self._cfg.chunk_ms,
             },
@@ -101,6 +111,7 @@ class AudioInput:
             logger.warning("audio_in_dropped_chunks", extra={"dropped": self._dropped})
 
         logger.info("audio_in_stopped")
+        self._effective_sample_rate = None
 
     async def __aenter__(self) -> "AudioInput":
         self.start()
