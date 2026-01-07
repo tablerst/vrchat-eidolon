@@ -102,7 +102,8 @@ class AudioOutputSink:
             device=self._cfg.device,
             samplerate=self._cfg.sample_rate,
             channels=self._cfg.channels,
-            dtype="int24",
+            # We feed PCM16LE bytes into the raw stream.
+            dtype="int16",
             callback=_callback,
         )
         self._stream.start()
@@ -121,7 +122,7 @@ class AudioOutputSink:
                 "sample_rate": self._cfg.sample_rate,
                 "effective_sample_rate": self.sample_rate,
                 "channels": self._cfg.channels,
-                "dtype": "int24",
+                "dtype": "int16",
             },
         )
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import audioop
 import base64
 import json
 import logging
@@ -192,32 +191,16 @@ class QwenRealtimeClient:
                 # The model streams base64-encoded PCM bytes. Deltas may split
                 # arbitrarily, so we must preserve sample alignment.
                 #
-                # Docs say output is PCM24; in practice, some stacks represent
-                # 24-bit audio as "24-in-32" (4 bytes/sample with the lowest
-                # byte often being 0x00). We auto-detect once per session.
+                # NOTE:
+                # DashScope's WebSocket protocol exposes output_audio_format as
+                # an enum value (e.g. "pcm24" for qwen3-omni-flash-realtime).
+                # The DashScope Python SDK documents this as
+                # PCM_24000HZ_MONO_16BIT, i.e. 24 kHz sample rate with 16-bit
+                # little-endian PCM samples. Treating this as 24-bit audio will
+                # cause classic "high pitch + loud noise" corruption.
                 pcm_tail = bytearray()
-                container_bytes_per_sample: int | None = None
-
-                def _detect_container_bytes(buf: bytearray) -> int | None:
-                    # Need enough data to get a stable ratio.
-                    if len(buf) < 4096:
-                        return None
-                    # If interpreted as 24-in-32, every 4th byte (the least
-                    # significant byte) is frequently 0x00.
-                    zeros = 0
-                    total = 0
-                    for i in range(0, min(len(buf) - (len(buf) % 4), 16384), 4):
-                        total += 1
-                        if buf[i] == 0x00:
-                            zeros += 1
-                    if total == 0:
-                        return None
-                    ratio = zeros / total
-                    if ratio > 0.85:
-                        logger.info("audio_out_pcm_container_detected", extra={"container_bytes": 4, "lsb0_ratio": ratio})
-                        return 4
-                    logger.info("audio_out_pcm_container_detected", extra={"container_bytes": 3, "lsb0_ratio": ratio})
-                    return 3
+                bytes_per_sample = 2
+                misaligned_chunks = 0
 
                 async for msg in ws:
                     data = json.loads(msg)
@@ -263,16 +246,22 @@ class QwenRealtimeClient:
                         if not isinstance(delta, str):
                             continue
 
-                        pcm_tail.extend(base64.b64decode(delta))
+                        raw = base64.b64decode(delta)
+                        if len(raw) % bytes_per_sample != 0:
+                            # Keep it as a warning (and rate-limit) to catch
+                            # wire-format mismatches without spamming logs.
+                            misaligned_chunks += 1
+                            if misaligned_chunks <= 3:
+                                logger.warning(
+                                    "audio_wire_chunk_not_sample_aligned",
+                                    extra={"len": len(raw), "bytes_per_sample": bytes_per_sample},
+                                )
+
+                        pcm_tail.extend(raw)
                         if not pcm_tail:
                             continue
 
-                        if container_bytes_per_sample is None:
-                            container_bytes_per_sample = _detect_container_bytes(pcm_tail)
-                            if container_bytes_per_sample is None:
-                                continue
-
-                        frame_bytes_wire = container_bytes_per_sample * self._cfg.output_channels
+                        frame_bytes_wire = bytes_per_sample * self._cfg.output_channels
 
                         # Only process full frames to avoid byte misalignment.
                         n = (len(pcm_tail) // frame_bytes_wire) * frame_bytes_wire
@@ -282,8 +271,8 @@ class QwenRealtimeClient:
                         pcm = bytes(pcm_tail[:n])
                         del pcm_tail[:n]
 
-                        # Down-convert to PCM16LE for playback stability.
-                        pcm16 = audioop.lin2lin(pcm, container_bytes_per_sample, 2)
+                        # Wire format is assumed PCM16LE at cfg.output_sample_rate_hz.
+                        pcm16 = pcm
                         if out_converter is not None:
                             pcm16 = out_converter.convert(pcm16)
 
