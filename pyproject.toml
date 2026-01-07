@@ -14,6 +14,7 @@ dependencies = [
 	"langgraph>=1.0.5",
 	"sounddevice>=0.5.3",
 	"langchain-openai>=1.1.6",
+	"websockets>=15.0.1",
 ]
 
 [project.scripts]

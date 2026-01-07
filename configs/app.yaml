@@ -6,14 +6,27 @@ qwen:
   model: qwen3-omni-flash
   timeout_s: 30
   max_retries: 3
+  # Qwen-Omni-Realtime (WebSocket)
+  # Docs: https://help.aliyun.com/zh/model-studio/realtime
+  realtime:
+    url: wss://dashscope.aliyuncs.com/api-ws/v1/realtime
+    model: qwen3-omni-flash-realtime
+    voice: Cherry
+    instructions: You are a helpful assistant.
+    turn_detection:
+      # server VAD threshold in [0, 1]
+      threshold: 0.5
 
 audio:
   input:
     device: null
     sample_rate: 48000
     channels: 1
+    # Chunk size for streaming to Realtime.
+    chunk_ms: 100
   output:
-    device: CABLE Input
+    # Default to system output device. For VB-CABLE etc, override in configs/dev.yaml.
+    device: null
     sample_rate: 48000
     channels: 1
   vad:

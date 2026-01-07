@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import argparse
 import json
 import logging
@@ -10,6 +11,7 @@ from typing import Sequence
 from vrchat_eidolon.config.errors import ConfigError
 from vrchat_eidolon.config.loader import load_config, resolve_profile_configs
 from vrchat_eidolon.observability.logging import configure_logging
+from vrchat_eidolon.runtime.speech_loop import run_speech_loop
 
 
 logger = logging.getLogger(__name__)
@@ -18,7 +20,7 @@ logger = logging.getLogger(__name__)
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vrchat-eidolon",
-        description="VRChat Eidolon (Milestone 0 scaffold)",
+        description="VRChat Eidolon (Milestone 1: Realtime Speech Loop MVP)",
     )
 
     parser.add_argument(
@@ -42,8 +44,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command")
 
-    run_p = sub.add_parser("run", help="Run the agent (scaffold)")
+    run_p = sub.add_parser("run", help="Run the Realtime Speech Loop")
     run_p.set_defaults(command="run")
+
+    dev_p = sub.add_parser("devices", help="List available audio devices")
+    dev_p.set_defaults(command="devices")
 
     print_p = sub.add_parser("print-config", help="Load and print the expanded config")
     print_p.set_defaults(command="print-config")
@@ -64,7 +69,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Default to `run` when no subcommand is provided.
     if not argv_list or (argv_list and not argv_list[0].startswith("-")):
         # If the first token is a known subcommand, leave it as-is.
-        known = {"run", "print-config"}
+        known = {"run", "print-config", "devices"}
         if not argv_list or argv_list[0] not in known:
             argv_list = ["run", *argv_list]
 
@@ -78,6 +83,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         return int(code) if isinstance(code, int) else 1
 
     configure_logging(level=ns.log_level)
+
+    # Commands that should work without loading any config (and therefore
+    # without requiring env vars like DASHSCOPE_API_KEY).
+    if ns.command == "devices":
+        import sounddevice as sd
+
+        sys.stdout.write(json.dumps(sd.query_devices(), ensure_ascii=False, indent=2))
+        sys.stdout.write("\n")
+        return 0
 
     configs_dir = Path.cwd() / "configs"
     try:
@@ -98,8 +112,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             sys.stdout.write("\n")
             return 0
 
-        # Scaffold: later milestones will start long-lived tasks here.
-        logger.info("runtime_started", extra={"milestone": 0})
+        logger.info("runtime_started", extra={"milestone": 1})
+        asyncio.run(run_speech_loop(cfg))
         return 0
 
     except ConfigError as e:

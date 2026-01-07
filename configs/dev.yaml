@@ -6,12 +6,20 @@ qwen:
   model: qwen3-omni-flash
   timeout_s: 30
   max_retries: 3
+  realtime:
+    url: wss://dashscope.aliyuncs.com/api-ws/v1/realtime
+    model: qwen3-omni-flash-realtime
+    voice: Cherry
+    instructions: You are a helpful assistant.
+    turn_detection:
+      threshold: 0.5
 
 audio:
   input:
     device: null
     sample_rate: 48000
     channels: 1
+    chunk_ms: 100
   output:
     device: CABLE Input
     sample_rate: 48000
