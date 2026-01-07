@@ -6,6 +6,10 @@
 - Developer-facing docs in this repository should be English-first.
 - User-facing text (e.g., chat output) can be localized as needed, but keep internal naming/log fields in English.
 
+Import policy (important):
+
+- For in-repo modules, prefer fully-qualified imports under `vrchat_eidolon.*` (avoid implicit top-level imports).
+
 ---
 
 ## Dev environment tips (avoid “guess-and-fix”)
@@ -20,11 +24,11 @@ When debugging or adding features, always locate and reason about this chain:
 
 Implementation anchors (start here, then branch out):
 
-- Orchestration: `src/runtime/lifecycle.py`, `src/graph/build.py`, `src/graph/state.py`, `src/graph/nodes/*`
-- Qwen adapter: `src/llm/client.py` (and its streamed tool-call accumulation)
-- Tool governance: `src/eidolon_mcp/policy.py`, `src/eidolon_mcp/registry.py`
-- Config: `src/config.py`
-- Observability: `src/runtime/logging.py`
+- Orchestration: `vrchat_eidolon/runtime/lifecycle.py`, `vrchat_eidolon/graph/build.py`, `vrchat_eidolon/graph/state.py`, `vrchat_eidolon/graph/nodes/*`
+- Qwen adapter: `vrchat_eidolon/llm/client.py` (and its streamed tool-call accumulation)
+- Tool governance: `vrchat_eidolon/mcp/policy.py`, `vrchat_eidolon/mcp/registry.py`
+- Config: `vrchat_eidolon/config.py`
+- Observability: `vrchat_eidolon/runtime/logging.py`
 
 > Note: **VRChat OSC is NOT implemented in this repo anymore.**
 > VRChat-related control is provided by an **external MCP service**. This repo focuses on orchestration, safety/guards, and audio.
@@ -84,7 +88,7 @@ Sharp edges (read twice):
 
 Practical notes:
 
-- `src/llm/client.py` should enforce `stream=True` for all Omni calls.
+- `vrchat_eidolon/llm/client.py` should enforce `stream=True` for all Omni calls.
 - If you see “Missing dependency 'openai'”, fix the environment (not the code): install it via `uv add openai`.
 
 ---

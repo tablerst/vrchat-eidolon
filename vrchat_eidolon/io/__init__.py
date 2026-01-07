@@ -1,4 +1,7 @@
 """Device I/O layer.
 
-Named `device_io` to avoid shadowing Python's standard-library `io` module.
+This package is named `io`, which can be confused with Python's standard-library
+`io` module. Always import it via the fully-qualified name:
+
+	- `vrchat_eidolon.io`
 """

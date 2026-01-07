@@ -17,7 +17,7 @@ from langchain_core.messages import BaseMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
-from llm.tool_call_accumulator import InvalidToolCall, ToolCall, ToolCallAccumulator
+from vrchat_eidolon.llm.tool_call_accumulator import InvalidToolCall, ToolCall, ToolCallAccumulator
 
 
 @dataclass(frozen=True)

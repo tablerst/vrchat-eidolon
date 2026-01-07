@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from config import ConfigError, load_config
+from vrchat_eidolon.config import ConfigError, load_config
 
 
 def test_load_config_dev_defaults_domestic_base_url(monkeypatch: pytest.MonkeyPatch) -> None:

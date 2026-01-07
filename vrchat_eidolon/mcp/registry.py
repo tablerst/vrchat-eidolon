@@ -18,7 +18,7 @@ from typing import Any
 from langchain_core.tools import BaseTool
 from pydantic import PrivateAttr
 
-from mcp.policy import PolicyError, ToolPolicy
+from vrchat_eidolon.mcp.policy import PolicyError, ToolPolicy
 
 
 @dataclass(frozen=True)

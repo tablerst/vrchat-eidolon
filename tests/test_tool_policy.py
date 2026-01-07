@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from eidolon_mcp.policy import (
+from vrchat_eidolon.mcp.policy import (
     ToolDisabledError,
     ToolNotAllowedError,
     ToolPolicy,

@@ -13,7 +13,13 @@ import argparse
 import time
 from pathlib import Path
 
-from runtime.logging import configure_logging, get_logger, init_observability_context, set_state, set_turn_id
+from vrchat_eidolon.runtime.logging import (
+    configure_logging,
+    get_logger,
+    init_observability_context,
+    set_state,
+    set_turn_id,
+)
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -51,7 +57,7 @@ def main() -> None:
     log = get_logger("runtime.lifecycle")
 
     try:
-        from config import ConfigError, load_config
+        from vrchat_eidolon.config import ConfigError, load_config
 
         cfg = load_config(args.config)
     except Exception as exc:
@@ -64,7 +70,7 @@ def main() -> None:
 
     # Build core adapters (no network calls at startup).
     try:
-        from llm.client import EidolonLLMClient
+        from vrchat_eidolon.llm.client import EidolonLLMClient
 
         _llm = EidolonLLMClient.from_config(cfg)
         log.info("LLM client initialized", extra={"model": cfg.get("qwen", {}).get("model")})

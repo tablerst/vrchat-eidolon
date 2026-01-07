@@ -26,10 +26,10 @@ Optional (without relying on the installed console script): `uv run python main.
 This repo uses **`langchain-mcp-adapters`** to manage MCP connections and load MCP tools.
 
 - Code path:
-	- Runtime lifecycle (outer loop): `src/runtime/lifecycle.py`
-	- LangGraph tick graph: `src/graph/build.py`, `src/graph/state.py`, `src/graph/nodes/*`
-	- MCP client + registry + policy: `src/eidolon_mcp/client.py`, `src/eidolon_mcp/registry.py`, `src/eidolon_mcp/policy.py`
-	- LLM wrapper (OpenAI-compatible): `src/llm/client.py`
+	- Runtime lifecycle (outer loop): `vrchat_eidolon/runtime/lifecycle.py`
+	- LangGraph tick graph: `vrchat_eidolon/graph/build.py`, `vrchat_eidolon/graph/state.py`, `vrchat_eidolon/graph/nodes/*`
+	- MCP client + registry + policy: `vrchat_eidolon/mcp/client.py`, `vrchat_eidolon/mcp/registry.py`, `vrchat_eidolon/mcp/policy.py`
+	- LLM wrapper (OpenAI-compatible): `vrchat_eidolon/llm/client.py`
 
 Configuration:
 
@@ -43,7 +43,7 @@ Tool naming:
   - `{prefix}__{toolName}`
   - `prefix` is a stable 4-character hash derived from `server_key`, and the first char is guaranteed to be non-numeric.
 
-Note: this naming policy is documented in `PLAN.md`. The implementation lives under `src/eidolon_mcp/`.
+Note: this naming policy is documented in `PLAN.md`. The implementation lives under `vrchat_eidolon/mcp/`.
 
 ## Tests
 

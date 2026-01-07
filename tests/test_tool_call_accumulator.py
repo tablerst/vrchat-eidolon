@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from llm.tool_call_accumulator import ToolCallAccumulator
+from vrchat_eidolon.llm.tool_call_accumulator import ToolCallAccumulator
 
 
 def test_accumulator_parses_fragmented_json_args() -> None:
