@@ -78,7 +78,15 @@ class QwenRealtimeClient:
 
         # Track TTFA per item_id (turn).
         turns: dict[str, TurnTtfa] = {}
-        pending_play_turns: deque[str] = deque()
+
+        # Map output "play epochs" to turn ids, so we can attribute the first
+        # audible output to the correct turn even under cancellation.
+        epoch_to_turn: dict[int, str] = {}
+
+        # Track current response lifecycle for cancel behavior.
+        active_response_id: str | None = None
+        cancelled_response_ids: set[str] = set()
+        last_cancel_ms: int = 0
 
         # Best-effort audio mapping to avoid the classic "garbled noise" symptom
         # when device sample rates don't match the model wire format.
@@ -123,69 +131,122 @@ class QwenRealtimeClient:
 
         async def _play_tracker() -> None:
             while True:
-                _ = await audio_out.next_play_started()
-                # Attribute play-start to the earliest turn that has audio but
-                # hasn't yet been marked as played.
-                while pending_play_turns:
-                    turn_id = pending_play_turns.popleft()
-                    t = turns.get(turn_id)
-                    if t is None or t.first_audio_played_ms is not None:
-                        continue
-                    t.first_audio_played_ms = monotonic_ms()
-                    logger.info(
-                        "ttfa",
-                        extra={
-                            "turn_id": turn_id,
-                            "eos_proxy_ms": t.eos_proxy_ms,
-                            "first_audio_delta_ms": t.first_audio_delta_ms,
-                            "first_audio_played_ms": t.first_audio_played_ms,
-                            "ttf_delta_ms": t.ttf_delta_ms(),
-                            "ttfa_ms": t.ttfa_ms(),
-                        },
-                    )
-                    break
+                epoch = await audio_out.next_play_started()
+                turn_id = epoch_to_turn.pop(epoch, None)
+                if turn_id is None:
+                    continue
+
+                t = turns.get(turn_id)
+                if t is None or t.first_audio_played_ms is not None:
+                    continue
+
+                t.first_audio_played_ms = monotonic_ms()
+                logger.info(
+                    "ttfa",
+                    extra={
+                        "turn_id": turn_id,
+                        "eos_proxy_ms": t.eos_proxy_ms,
+                        "first_audio_delta_ms": t.first_audio_delta_ms,
+                        "first_audio_played_ms": t.first_audio_played_ms,
+                        "ttf_delta_ms": t.ttf_delta_ms(),
+                        "ttfa_ms": t.ttfa_ms(),
+                    },
+                )
 
         async with websockets.connect(url, additional_headers=headers, ping_interval=20, ping_timeout=20) as ws:
             logger.info("realtime_connected", extra={"url": self._cfg.url, "model": self._cfg.model})
 
-            await ws.send(
-                json.dumps(
-                    {
-                        "event_id": _event_id(),
-                        "type": "session.update",
-                        "session": {
-                            "modalities": ["text", "audio"],
-                            "voice": self._cfg.voice,
-                            "input_audio_format": self._cfg.input_audio_format,
-                            "output_audio_format": self._cfg.output_audio_format,
-                            "instructions": self._cfg.instructions,
-                            "turn_detection": {
-                                "type": "server_vad",
-                                "threshold": self._cfg.turn_threshold,
-                                "silence_duration_ms": self._cfg.silence_duration_ms,
-                            },
+            send_lock = asyncio.Lock()
+
+            async def _send(payload: Mapping[str, Any]) -> None:
+                # websockets.send() is not safe to call concurrently.
+                async with send_lock:
+                    await ws.send(json.dumps(payload, ensure_ascii=False))
+
+            await _send(
+                {
+                    "event_id": _event_id(),
+                    "type": "session.update",
+                    "session": {
+                        "modalities": ["text", "audio"],
+                        "voice": self._cfg.voice,
+                        "input_audio_format": self._cfg.input_audio_format,
+                        "output_audio_format": self._cfg.output_audio_format,
+                        "instructions": self._cfg.instructions,
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "threshold": self._cfg.turn_threshold,
+                            "silence_duration_ms": self._cfg.silence_duration_ms,
                         },
                     },
-                    ensure_ascii=False,
-                )
+                }
             )
 
+            def _should_barge_in_cancel() -> bool:
+                # Best-effort: treat "audible recently" or "buffered" as speaking.
+                return audio_out.is_audible(within_ms=400) or audio_out.pending_bytes() > 0
+
+            async def _cancel_active_response(*, reason: str) -> None:
+                nonlocal active_response_id, last_cancel_ms
+
+                now = monotonic_ms()
+                if now - last_cancel_ms < 400:
+                    return
+                last_cancel_ms = now
+
+                if active_response_id is not None:
+                    cancelled_response_ids.add(active_response_id)
+
+                    # Request server-side cancellation (VAD mode can have an in-flight response).
+                    # Spec: client event type=response.cancel
+                    try:
+                        await _send({"event_id": _event_id(), "type": "response.cancel"})
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("response_cancel_send_failed", extra={"error": str(e), "reason": reason})
+
+                    # Debounce follow-up cancels; response.done will arrive.
+                    active_response_id = None
+
+                dropped = audio_out.flush()
+                epoch_to_turn.clear()
+                logger.info(
+                    "barge_in_cancel",
+                    extra={
+                        "reason": reason,
+                        "active_response_id": active_response_id,
+                        "dropped_bytes": dropped,
+                    },
+                )
+
             async def _sender() -> None:
-                async for chunk in audio_in.chunks():
+                # Avoid blocking forever when silent so we can react promptly to
+                # websocket disconnects and session rotation.
+                while True:
+                    chunk = await audio_in.get_chunk(timeout_s=0.2)
+                    if chunk is None:
+                        continue
+
                     send_chunk = chunk
                     if in_converter is not None:
                         send_chunk = in_converter.convert(send_chunk)
 
                     b64 = base64.b64encode(send_chunk).decode("ascii")
-                    await ws.send(
-                        json.dumps(
-                            {
-                                "event_id": _event_id(),
-                                "type": "input_audio_buffer.append",
-                                "audio": b64,
-                            }
-                        )
+                    await _send(
+                        {
+                            "event_id": _event_id(),
+                            "type": "input_audio_buffer.append",
+                            "audio": b64,
+                        }
                     )
+
+            async def _rotate_session_timer() -> None:
+                # DashScope closes sessions at ~30 minutes; rotate a bit earlier.
+                await asyncio.sleep(self._cfg.session_max_age_s)
+                logger.info("realtime_session_rotation_requested", extra={"max_age_s": self._cfg.session_max_age_s})
+                try:
+                    await ws.close(code=1000, reason="session rotation")
+                except Exception:  # noqa: BLE001
+                    pass
 
             async def _receiver() -> None:
                 # The model streams base64-encoded PCM bytes. Deltas may split
@@ -212,6 +273,33 @@ class QwenRealtimeClient:
 
                     if typ in {"session.created", "session.updated"}:
                         logger.info("realtime_session", extra={"type": typ, "session": data.get("session")})
+                        continue
+
+                    if typ == "response.created":
+                        resp = data.get("response")
+                        resp_id = None
+                        if isinstance(resp, dict):
+                            resp_id = resp.get("id")
+                        if isinstance(resp_id, str):
+                            active_response_id = resp_id
+                            logger.info("response_created", extra={"response_id": resp_id})
+                        continue
+
+                    if typ == "response.done":
+                        resp = data.get("response")
+                        resp_id = None
+                        if isinstance(resp, dict):
+                            resp_id = resp.get("id")
+                        if isinstance(resp_id, str):
+                            logger.info("response_done", extra={"response_id": resp_id})
+                            if active_response_id == resp_id:
+                                active_response_id = None
+                        continue
+
+                    if typ == "input_audio_buffer.speech_started":
+                        # Barge-in: user starts speaking while assistant is speaking.
+                        if _should_barge_in_cancel():
+                            await _cancel_active_response(reason="speech_started")
                         continue
 
                     if typ == "input_audio_buffer.speech_stopped":
@@ -243,7 +331,11 @@ class QwenRealtimeClient:
                     if typ == "response.audio.delta":
                         delta = data.get("delta")
                         item_id = data.get("item_id")
+                        response_id = data.get("response_id")
                         if not isinstance(delta, str):
+                            continue
+
+                        if isinstance(response_id, str) and response_id in cancelled_response_ids:
                             continue
 
                         raw = base64.b64decode(delta)
@@ -276,7 +368,7 @@ class QwenRealtimeClient:
                         if out_converter is not None:
                             pcm16 = out_converter.convert(pcm16)
 
-                        audio_out.append_pcm16(pcm16)
+                        epoch = audio_out.append_pcm16(pcm16)
 
                         if isinstance(item_id, str):
                             t = turns.get(item_id)
@@ -285,7 +377,8 @@ class QwenRealtimeClient:
                                 turns[item_id] = t
                             if t.first_audio_delta_ms is None:
                                 t.first_audio_delta_ms = monotonic_ms()
-                                pending_play_turns.append(item_id)
+                                if epoch is not None:
+                                    epoch_to_turn[epoch] = item_id
                                 logger.info(
                                     "first_audio_delta",
                                     extra={
@@ -306,10 +399,15 @@ class QwenRealtimeClient:
                     # Keep other events at debug; they can be noisy.
                     logger.debug("realtime_event", extra={"type": typ, "data": data})
 
+                # Exiting the receive loop means the websocket closed.
+                # Raise to force TaskGroup cancellation even if sender is idle.
+                raise ConnectionError("websocket receive loop ended")
+
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(_play_tracker())
                 tg.create_task(_sender())
                 tg.create_task(_receiver())
+                tg.create_task(_rotate_session_timer())
 
             # If we ever get here, the session ended.
             logger.info("realtime_disconnected")

@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from vrchat_eidolon.io.audio_in import AudioInput, AudioInputConfig
 from vrchat_eidolon.io.audio_out import AudioOutputConfig, AudioOutputSink
+from vrchat_eidolon.io.loopback_in import ProcessLoopbackInput, ProcessLoopbackInputConfig
 from vrchat_eidolon.llm.qwen_realtime import QwenRealtimeClient, QwenRealtimeConfig
 
 
@@ -45,6 +46,10 @@ async def run_speech_loop(cfg: Mapping[str, Any]) -> None:
     sample_rate_in = int(_get(cfg, "audio.input.sample_rate", 48000))
     channels_in = int(_get(cfg, "audio.input.channels", 1))
     device_in = _get(cfg, "audio.input.device", None)
+    input_source = str(_get(cfg, "audio.input.source", "mic"))
+
+    loopback_pid = _get(cfg, "audio.loopback.pid", None)
+    loopback_process_name = _get(cfg, "audio.loopback.process_name", "VRChat.exe")
 
     sample_rate_out = int(_get(cfg, "audio.output.sample_rate", 48000))
     channels_out = int(_get(cfg, "audio.output.channels", 1))
@@ -56,6 +61,7 @@ async def run_speech_loop(cfg: Mapping[str, Any]) -> None:
     logger.info(
         "speech_loop_config",
         extra={
+            "input_source": input_source,
             "ws_url": url,
             "model": model,
             "voice": voice,
@@ -96,6 +102,25 @@ async def run_speech_loop(cfg: Mapping[str, Any]) -> None:
 
     client = QwenRealtimeClient(cfg=ai_cfg, api_key=api_key)
 
-    async with AudioInput(in_cfg) as audio_in, AudioOutputSink(out_cfg) as audio_out:
+    if input_source == "mic":
+        audio_in_cm = AudioInput(in_cfg)
+    elif input_source in {"process_loopback", "loopback"}:
+        pid_val: int | None = None
+        if isinstance(loopback_pid, int):
+            pid_val = int(loopback_pid)
+        elif isinstance(loopback_pid, str) and loopback_pid.strip().isdigit():
+            pid_val = int(loopback_pid.strip())
+
+        audio_in_cm = ProcessLoopbackInput(
+            ProcessLoopbackInputConfig(
+                pid=pid_val,
+                process_name=str(loopback_process_name) if loopback_process_name is not None else None,
+                chunk_ms=chunk_ms,
+            )
+        )
+    else:
+        raise ValueError(f"Unknown audio.input.source={input_source!r}; expected 'mic' or 'process_loopback'")
+
+    async with audio_in_cm as audio_in, AudioOutputSink(out_cfg) as audio_out:
         async with asyncio.TaskGroup() as tg:
             tg.create_task(client.run(audio_in=audio_in, audio_out=audio_out))

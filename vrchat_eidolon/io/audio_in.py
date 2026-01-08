@@ -124,6 +124,28 @@ class AudioInput:
         """Async iterator of pcm16 chunks."""
 
         while True:
-            # Offload the blocking queue.get() to a worker thread.
-            data = await asyncio.to_thread(self._q.get)
+            data = await self.get_chunk(timeout_s=None)
+            # get_chunk(timeout_s=None) never returns None.
+            if data is None:
+                continue
             yield data
+
+    async def get_chunk(self, *, timeout_s: float | None) -> bytes | None:
+        """Get the next PCM16 chunk.
+
+        This method exists to allow graceful shutdown/reconnect logic without
+        blocking forever when the microphone is silent.
+
+        Args:
+            timeout_s: When None, waits indefinitely. Otherwise returns None on timeout.
+        """
+
+        def _get() -> bytes | None:
+            try:
+                if timeout_s is None:
+                    return self._q.get()
+                return self._q.get(timeout=timeout_s)
+            except queue.Empty:
+                return None
+
+        return await asyncio.to_thread(_get)

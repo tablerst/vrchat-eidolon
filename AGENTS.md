@@ -14,12 +14,12 @@ Import policy (important):
 
 ## Architecture guardrails (read twice)
 
-- **Dual-loop architecture** is intentional:
-  - **Speech Loop**: low-latency audio I/O via Qwen-Omni-Realtime (WebSocket).
-  - **Action Loop**: planning + tool execution (MCP) orchestrated at turn-level.
-- **Do not put millisecond-level audio streaming inside LangGraph.** LangGraph is for turn-level control flow, fan-out tool execution, and state management.
-- **Speak before act** is enforced by a latch/gate (no sleeps): do not execute “heavy” tools (move/turn/large gestures) until the first audio has actually started playing.
-- **VRChat control is external**: this repo is an MCP *client* and orchestrator. Do not implement a VRChat OSC/MCP server inside this repository.
+- **MVP priority is the Speech Loop**: low-latency audio I/O via Qwen-Omni-Realtime (WebSocket) with reliable **barge-in / interruption** handling.
+- **MCP / Action Loop / LangGraph are post-MVP**: keep placeholders if needed, but do not build tool execution into the MVP runtime yet.
+- **Do not put millisecond-level audio streaming inside LangGraph.** LangGraph (when added) is for turn-level orchestration only.
+- **VRChat control remains external**: do not implement a VRChat OSC/MCP server inside this repository.
+- **VRChat audio output**: route TTS audio to **VB-CABLE** (virtual audio cable) for the closed-loop MVP.
+- **Inputs**: support microphone input plus process loopback (Windows 20H1+) via Proctap / `proc-tap`.
 
 ---
 
@@ -50,9 +50,12 @@ Import policy (important):
 - Backpressure must be explicit:
   - Use **bounded** queues.
   - Define drop strategy: typically **drop old frames** (vision) but avoid dropping audio unless explicitly acceptable.
-- Tool fan-out must be bounded:
+- (Post-MVP) Tool fan-out must be bounded:
   - Enforce a concurrency cap (e.g., semaphore).
   - Tool execution should be cancelable, but must always clean up sessions/resources.
+- For MVP interruption support:
+  - cancellation must flush local audio output queues deterministically
+  - avoid blocking the audio hot path when toggling inputs or performing cancels
 - Shared state:
   - Prefer message passing (events) over shared mutable state.
   - If using LangGraph state reducers, ensure merges are deterministic.

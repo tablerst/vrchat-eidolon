@@ -62,6 +62,24 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Config profile under ./configs (app loads app.yaml; dev overlays dev.yaml)",
     )
 
+    parser.add_argument(
+        "--input-source",
+        choices=["mic", "process_loopback"],
+        default=None,
+        help="Override audio input source (mic | process_loopback)",
+    )
+    parser.add_argument(
+        "--loopback-pid",
+        type=int,
+        default=None,
+        help="Override process loopback PID (Windows 20H1+). When set, takes precedence over process name.",
+    )
+    parser.add_argument(
+        "--loopback-process-name",
+        default=None,
+        help="Override process loopback process name (e.g. VRChat.exe)",
+    )
+
     sub = parser.add_subparsers(dest="command")
 
     run_p = sub.add_parser("run", help="Run the Realtime Speech Loop")
@@ -121,6 +139,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             config_paths = resolve_profile_configs(profile=ns.profile, configs_dir=configs_dir)
 
         cfg = load_config(config_paths)
+
+        # Apply non-secret runtime overrides from CLI. YAML remains the primary
+        # source of truth for reproducible config.
+        if ns.input_source is not None:
+            cfg.setdefault("audio", {}).setdefault("input", {})["source"] = ns.input_source
+
+        if ns.loopback_pid is not None:
+            cfg.setdefault("audio", {}).setdefault("loopback", {})["pid"] = ns.loopback_pid
+        if ns.loopback_process_name is not None:
+            cfg.setdefault("audio", {}).setdefault("loopback", {})["process_name"] = ns.loopback_process_name
 
         logger.info(
             "config_loaded",

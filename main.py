@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-def main() -> int:
-
-    return 0
-
+from runtime.lifecycle import main
 
 if __name__ == "__main__":
-    raise SystemExit(main())
-
+    main()

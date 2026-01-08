@@ -26,14 +26,21 @@ qwen:
 
 audio:
   input:
+    # mic | process_loopback
+    source: mic
     device: null
     sample_rate: 48000
     channels: 1
     # Chunk size for streaming to Realtime.
     chunk_ms: 100
+  loopback:
+    # For process loopback capture (Windows 20H1+).
+    # Prefer process_name for local dev; set pid explicitly if you need stability.
+    process_name: VRChat.exe
+    pid: null
   output:
     # Default to system output device. For VB-CABLE etc, override in configs/dev.yaml.
-    device: null
+    device: Output (VB-Audio Point)
     sample_rate: 48000
     channels: 1
   vad:

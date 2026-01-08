@@ -4,6 +4,7 @@ import asyncio
 import logging
 import threading
 from dataclasses import dataclass
+import time
 
 import audioop
 
@@ -48,6 +49,10 @@ class AudioOutputSink:
         self._awaiting_play_epoch: int | None = None
         self._play_started_q: asyncio.Queue[int] = asyncio.Queue()
 
+        # Best-effort indicator of recent non-silent playback.
+        # Written from the PortAudio callback thread, read from asyncio tasks.
+        self._last_non_silent_s: float | None = None
+
     @property
     def device(self) -> str | int | None:
         return self._cfg.device
@@ -83,6 +88,11 @@ class AudioOutputSink:
 
             if got < want:
                 outdata[got:want] = b"\x00" * (want - got)
+
+            if got > 0:
+                # Update non-silent playback marker.
+                with self._lock:
+                    self._last_non_silent_s = time.monotonic()
 
             # If we actually output anything from the internal buffer and we're
             # waiting for a play-start marker, emit it.
@@ -145,11 +155,13 @@ class AudioOutputSink:
     async def __aexit__(self, exc_type, exc, tb) -> None:  # noqa: ANN001
         self.stop()
 
-    def append_pcm16(self, pcm16: bytes) -> None:
+    def append_pcm16(self, pcm16: bytes) -> int | None:
         if not pcm16:
-            return
+            return None
 
         frame_bytes = 2 * self._cfg.channels
+        emitted_epoch: int | None = None
+
         with self._lock:
             was_empty = not self._buf
 
@@ -163,8 +175,11 @@ class AudioOutputSink:
             if was_empty and self._buf and self._awaiting_play_epoch is None:
                 self._play_epoch += 1
                 self._awaiting_play_epoch = self._play_epoch
+                emitted_epoch = self._play_epoch
 
-    def append_pcm24(self, pcm24: bytes) -> None:
+        return emitted_epoch
+
+    def append_pcm24(self, pcm24: bytes) -> int | None:
         """Append PCM24LE (packed) by downconverting to PCM16LE."""
 
         if len(pcm24) % 3 != 0:
@@ -172,7 +187,44 @@ class AudioOutputSink:
 
         # Down-convert for broader device compatibility.
         pcm16 = audioop.lin2lin(pcm24, 3, 2)
-        self.append_pcm16(pcm16)
+        return self.append_pcm16(pcm16)
+
+    def pending_bytes(self) -> int:
+        """Number of bytes currently buffered for playback (best-effort)."""
+
+        with self._lock:
+            return len(self._buf) + len(self._tail)
+
+    def is_audible(self, *, within_ms: int = 300) -> bool:
+        """Return True if we played non-silent audio recently (best-effort)."""
+
+        with self._lock:
+            t = self._last_non_silent_s
+        if t is None:
+            return False
+        return (time.monotonic() - t) * 1000.0 <= float(within_ms)
+
+    def flush(self) -> int:
+        """Drop all pending audio immediately.
+
+        This is used for barge-in/cancellation. It clears in-process buffers.
+        It cannot control already-buffered audio inside the host audio stack.
+
+        Returns:
+            The number of buffered bytes dropped.
+        """
+
+        with self._lock:
+            dropped = len(self._buf) + len(self._tail)
+            self._buf.clear()
+            self._tail.clear()
+            self._awaiting_play_epoch = None
+
+            # Bump epoch so any in-flight play-start markers from a previous
+            # response won't accidentally match future turn mappings.
+            self._play_epoch += 1
+
+        return dropped
 
     async def next_play_started(self) -> int:
         """Wait for the next playback-start marker."""

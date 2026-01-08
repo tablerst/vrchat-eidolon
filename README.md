@@ -2,13 +2,31 @@
 
 VRChat Eidolon is a **speak-first, act-after** embodied agent orchestrator for VRChat.
 
-- This repository is an **MCP client** and orchestrator.
-- VRChat control is external (provided by an MCP server). This repo does **not** implement a VRChat OSC/MCP server.
+- MVP focus: **Realtime Speech Loop** (audio I/O closed-loop).
+- Post-MVP: MCP/tool execution and orchestration (VRChat control remains external).
+
+VRChat control is external (provided by an MCP server). This repo does **not** implement a VRChat OSC/MCP server.
 
 ## Development
 
 - Python: 3.12+
 - Package manager: `uv`
+
+### Python compatibility note: `audioop`
+
+This repo currently imports the stdlib module `audioop` for PCM conversion.
+
+- Python **3.12** includes `audioop`.
+- Python **3.13+** removed `audioop`.
+
+Until we migrate to **`audioop-lts`** (planned), **Python 3.13+ is not supported**.
+
+### Process loopback input: ProcTap (`proc-tap`)
+
+For Windows per-process loopback capture (Windows 20H1+), we plan to use ProcTap:
+
+- GitHub: https://github.com/m96-chan/ProcTap
+- Python package: `proc-tap`
 
 ## Quickstart
 
