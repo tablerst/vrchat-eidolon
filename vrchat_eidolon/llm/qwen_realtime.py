@@ -25,7 +25,10 @@ class QwenRealtimeConfig:
     url: str
     model: str
     voice: str = "Cherry"
-    instructions: str = "You are a helpful assistant."
+    instructions: str = (
+        "你在 VRChat 聊天：回复尽量简短（1-3 句）。用猫娘口吻，俏皮但不油腻。"
+        "默认在整条回复最后加一个“喵”（除非用户明确要求不要）。"
+    )
     turn_threshold: float = 0.5
     silence_duration_ms: int = 500
     input_audio_format: str = "pcm16"

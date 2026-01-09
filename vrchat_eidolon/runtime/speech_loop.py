@@ -35,7 +35,11 @@ async def run_speech_loop(cfg: Mapping[str, Any]) -> None:
     url = _get(cfg, "qwen.realtime.url", "wss://dashscope.aliyuncs.com/api-ws/v1/realtime")
     model = _get(cfg, "qwen.realtime.model", "qwen3-omni-flash-realtime")
     voice = _get(cfg, "qwen.realtime.voice", "Cherry")
-    instructions = _get(cfg, "qwen.realtime.instructions", "You are a helpful assistant.")
+    instructions = _get(
+        cfg,
+        "qwen.realtime.instructions",
+        "你在 VRChat 聊天：回复尽量简短（1-3 句）。用猫娘口吻，俏皮但不油腻。默认在整条回复最后加一个“喵”（除非用户明确要求不要）。",
+    )
     turn_threshold = float(_get(cfg, "qwen.realtime.turn_detection.threshold", 0.5))
 
     wire_in_rate = int(_get(cfg, "qwen.realtime.input_sample_rate_hz", 16000))
